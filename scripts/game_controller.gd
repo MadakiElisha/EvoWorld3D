@@ -37,6 +37,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				if lab == null:
 					lab = BalanceLab.new(sim)
 					print("LAB started — sim will run slowly while it searches, ~2-4 minutes")
+			KEY_H:
+				sim.spawn_herbs(10)
+				print("GOD: +10 herbivores")
+			KEY_P:
+				sim.spawn_preds(3)
+				print("GOD: +3 predators")
+			KEY_C:
+				sim.cull_preds(0.4)
+				print("GOD: culled 40% of predators")
 
 func _process(delta: float) -> void:
 	acc += delta * BASE_TPS * time_scale

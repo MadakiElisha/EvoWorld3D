@@ -448,3 +448,35 @@ func _escape_burst(prey: CreatureData, pred: CreatureData) -> void:
 			prey.z = nz
 			break
 	prey.energy -= 4.0
+
+func spawn_herbs(n: int) -> void:
+	for i in n:
+		for t in 50:
+			var x := randi_range(0, world.width - 1)
+			var z := randi_range(0, world.depth - 1)
+			if world.is_walkable(x, z):
+				creatures.append(make_creature(x + 0.5, z + 0.5, null))
+				break
+
+func spawn_preds(n: int) -> void:
+	for i in n:
+		for t in 50:
+			var x := randi_range(0, world.width - 1)
+			var z := randi_range(0, world.depth - 1)
+			if world.is_walkable(x, z) and world.biome_at(x, z) != WorldData.Biome.FOREST:
+				var c := make_creature(x + 0.5, z + 0.5, null)
+				c.species = CreatureData.Species.PRED
+				c.energy = 80.0
+				c.speed = pred_innate_speed
+				c.sense = pred_innate_sense
+				creatures.append(c)
+				break
+
+func cull_preds(fraction: float) -> void:
+	var targets: Array[CreatureData] = []
+	for c in creatures:
+		if c.species == CreatureData.Species.PRED:
+			targets.append(c)
+	targets.shuffle()
+	for i in int(targets.size() * fraction):
+		targets[i].alive = false
