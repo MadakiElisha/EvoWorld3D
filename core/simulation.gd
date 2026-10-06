@@ -393,7 +393,7 @@ func capture_probability(pred: CreatureData, prey: CreatureData) -> float:
 	var pred_eff := pred.speed * pred_step_mult
 	var prey_eff := prey.speed * panic_speed_mult
 	var r := pred_eff / maxf(prey_eff, 0.01)
-	return clampf(0.5 + 1.8 * (r - 1.0), 0.05, 0.95)
+	return clampf(0.55 + 1.4 * (r - 1.0), 0.20, 0.95)
 
 func _kill(pred: CreatureData, prey: CreatureData) -> void:
 	pred.energy += prey.energy * pred_kill_fraction + pred_kill_gain
