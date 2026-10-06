@@ -13,6 +13,7 @@ var visual_root: Node3D
 var creature_mm: MultiMesh
 var acc := 0.0
 var extinction_announced := false
+var lab: BalanceLab = null
 
 const BASE_TPS := 8.0
 const MAX_POP := 300
@@ -32,6 +33,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_2: time_scale = 4
 			KEY_3: time_scale = 16
 			KEY_4: time_scale = 64
+			KEY_F9:
+				if lab == null:
+					lab = BalanceLab.new(sim)
+					print("LAB started — sim will run slowly while it searches, ~2-4 minutes")
 
 func _process(delta: float) -> void:
 	acc += delta * BASE_TPS * time_scale
@@ -49,6 +54,9 @@ func _process(delta: float) -> void:
 				extinction_announced = true
 			acc = 0.0
 			break
+	if lab != null:
+		if not lab.step():
+			lab = null
 	render_creatures()
 
 func restart() -> void:

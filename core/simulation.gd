@@ -20,7 +20,7 @@ var food_max := 1.0
 
 # --- population ---
 var start_herbs := 80
-var start_preds := 10
+var start_preds := 6
 var max_pop := 300
 
 # --- herbivores ---
@@ -44,9 +44,9 @@ var pred_repro_energy := 140.0
 var pred_repro_age := 60
 var pred_baby_energy := 70.0
 var pred_kill_fraction := 0.45
-var pred_kill_gain := 20
+var pred_kill_gain := 15.0
 var pred_strike_range := 2.4
-var pred_cooldown := 16
+var pred_cooldown := 20
 var pred_miss_cooldown := 6
 var pred_body_mult := 1.0
 var pred_leg_mult := 1.2
@@ -56,9 +56,10 @@ var pred_hunt_mult := 1.5
 var pred_step_mult := 1.3
 var pred_rival_cost := 0.35
 var pred_rival_radius := 2.5
+var pred_breed_max_rivals := 1   # territorial: no breeding when the neighborhood is full
 
 # --- ambush / vigilance ---
-var ambush_p := 0.75
+var ambush_p := 0.85
 var alert_memory := 30
 
 # ---------------------------------------------------------------------------
@@ -263,7 +264,8 @@ func _reproduce(c: CreatureData, babies: Array[CreatureData]) -> void:
 	var is_pred := c.species == CreatureData.Species.PRED
 	var repro_e := pred_repro_energy if is_pred else repro_energy
 	var repro_a := pred_repro_age if is_pred else repro_age
-	if c.energy > repro_e and c.age > repro_a:
+	var crowded := is_pred and _rival_count(c) > pred_breed_max_rivals
+	if c.energy > repro_e and c.age > repro_a and not crowded:
 		c.energy *= 0.5
 		babies.append(make_baby(c))
 		if is_pred:
