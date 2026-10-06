@@ -1,6 +1,6 @@
 class_name CreatureData
 extends RefCounted
-## One creature's entire existence: position, energy, genes, species.
+## One creature's entire existence: position, energy, genes, species, vigilance.
 
 enum Species { HERB, PRED }
 
@@ -12,6 +12,7 @@ var age: int = 0
 var wander_angle: float = 0.0
 var alive: bool = true
 var cooldown: int = 0
+var alert_ticks := 0   # vigilance memory: >0 = head up; 0 = grazing (ambushable)
 
 # Genes (mutate on reproduction)
 var speed: float = 1.0

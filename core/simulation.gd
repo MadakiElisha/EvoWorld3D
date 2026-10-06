@@ -14,13 +14,13 @@ extends RefCounted
 # ---------------------------------------------------------------------------
 
 # --- plants ---
-var food_regrow := 0.006
-var forest_regrow_mult := 0.65     # refuge rations (predators cannot see into forest)
+var food_regrow := 0.012
+var forest_regrow_mult := 0.65
 var food_max := 1.0
 
 # --- population ---
-var start_herbs := 40
-var start_preds := 12
+var start_herbs := 80
+var start_preds := 10
 var max_pop := 300
 
 # --- herbivores ---
@@ -30,24 +30,24 @@ var move_cost := 0.25
 var repro_energy := 110.0
 var repro_age := 40
 var max_age := 600
-var mutation := 0.15
+var mutation := 0.08
 var herb_baby_energy := 25.0
 
 # --- fear and stamina ---
-var fear_energy := 60.0           # below this, hunger overrides caution
-var panic_cost := 0.9             # sprint stamina burn per fleeing tick (chases must end)
+var fear_energy := 60.0
+var panic_cost := 0.9
 var panic_speed_mult := 1.15
 
 # --- predators ---
 var pred_repro_energy := 140.0
 var pred_repro_age := 60
 var pred_baby_energy := 70.0
-var pred_kill_fraction := 0.35
+var pred_kill_fraction := 0.45
 var pred_kill_gain := 15.0
-var pred_strike_range := 2.4      # lunge range (no point-blank requirement)
-var pred_cooldown := 15           # handling time after a kill
-var pred_miss_cooldown := 6       # recovery after a missed lunge
-var pred_body_mult := 1.2
+var pred_strike_range := 2.4
+var pred_cooldown := 20
+var pred_miss_cooldown := 6
+var pred_body_mult := 1.0
 var pred_leg_mult := 1.2
 var pred_innate_speed := 1.5
 var pred_innate_sense := 2.0
@@ -55,6 +55,10 @@ var pred_hunt_mult := 1.5
 var pred_step_mult := 1.3
 var pred_rival_cost := 0.25
 var pred_rival_radius := 2.5
+
+# --- ambush / vigilance ---
+var ambush_p := 0.85
+var alert_memory := 30
 
 # ---------------------------------------------------------------------------
 # STATE
@@ -65,11 +69,15 @@ var creatures: Array[CreatureData] = []
 var food: PackedFloat32Array
 var tick_count := 0
 
+var _herbs: Array[CreatureData] = []
+var _preds: Array[CreatureData] = []
+
 # Measurement window counters (consumed by window_stats())
 var _w_kills := 0
 var _w_attempts := 0
 var _w_pred_births := 0
 var _w_pred_deaths := 0
+var _w_ambush := 0
 
 func _init(p_world: WorldData) -> void:
 	world = p_world
@@ -156,11 +164,21 @@ func gene_averages(species: int) -> Vector3:
 	if n == 0:
 		return Vector3.ZERO
 	return s / n
+	
+func _rebuild_caches() -> void:
+	_herbs.clear()
+	_preds.clear()
+	for c in creatures:
+		if c.species == CreatureData.Species.HERB:
+			_herbs.append(c)
+		else:
+			_preds.append(c)
 
 ## Predation internals for the last 500-tick window; resets on read.
 func window_stats() -> String:
 	var p := float(_w_kills) / maxf(float(_w_attempts), 1.0)
-	var s := "kills=%d att=%d p=%.2f pb=%d pd=%d" % [_w_kills, _w_attempts, p, _w_pred_births, _w_pred_deaths]
+	var s := "kills=%d att=%d p=%.2f amb=%d pb=%d pd=%d" % [_w_kills, _w_attempts, p, _w_ambush, _w_pred_births, _w_pred_deaths]
+	_w_ambush = 0
 	_w_kills = 0
 	_w_attempts = 0
 	_w_pred_births = 0
@@ -173,6 +191,7 @@ func window_stats() -> String:
 
 func tick() -> void:
 	tick_count += 1
+	_rebuild_caches()
 	_regrow_plants()
 	var babies: Array[CreatureData] = []
 	for c in creatures:
@@ -204,7 +223,7 @@ func _age_and_burn(c: CreatureData) -> void:
 
 func _rival_count(c: CreatureData) -> int:
 	var n := 0
-	for o in creatures:
+	for o in _preds:
 		if o == c or o.species != CreatureData.Species.PRED or not o.alive:
 			continue
 		var dx := o.x - c.x
@@ -278,9 +297,12 @@ func step_creature(c: CreatureData) -> int:
 		if not safe:
 			threat = nearest_predator(c, 1.8 if desperate else c.sense + 0.5)
 		if threat != null:
+			c.alert_ticks = alert_memory
 			desired = Vector2(c.x - threat.x, c.z - threat.z)
 			fleeing = true
 		else:
+			if c.alert_ticks > 0:
+				c.alert_ticks -= 1
 			desired = seek_food(c)
 			if desired == Vector2.ZERO:
 				c.wander_angle += randf_range(-0.6, 0.6)
@@ -344,7 +366,7 @@ func seek_food(c: CreatureData) -> Vector2:
 func nearest_predator(c: CreatureData, radius: float) -> CreatureData:
 	var best: CreatureData = null
 	var best_d := radius * radius
-	for o in creatures:
+	for o in _preds:
 		if o.species != CreatureData.Species.PRED or not o.alive:
 			continue
 		var dx := o.x - c.x
@@ -358,7 +380,7 @@ func nearest_predator(c: CreatureData, radius: float) -> CreatureData:
 func nearest_prey(c: CreatureData, radius: float) -> CreatureData:
 	var best: CreatureData = null
 	var best_d := radius * radius
-	for o in creatures:
+	for o in _herbs:
 		if o.species != CreatureData.Species.HERB or not o.alive:
 			continue
 		if world.biome_at(int(floor(o.x)), int(floor(o.z))) == WorldData.Biome.FOREST:
@@ -378,12 +400,19 @@ func _try_strike(c: CreatureData) -> void:
 	var dx := prey.x - c.x
 	var dz := prey.z - c.z
 	var d := sqrt(dx * dx + dz * dz)
+	var prox := clampf(1.0 - 0.5 * d / pred_strike_range, 0.0, 1.0)
 	_w_attempts += 1
-	var p := capture_probability(c, prey) * clampf(1.0 - 0.5 * d / pred_strike_range, 0.0, 1.0)
+	var p: float
+	if prey.alert_ticks <= 0:
+		p = ambush_p * prox                    # ambush: head-down grazer, speed irrelevant
+		_w_ambush += 1
+	else:
+		p = capture_probability(c, prey) * prox  # chase: the speed ratio decides
 	if randf() < p:
 		_kill(c, prey)
 	else:
 		_escape_burst(prey, c)
+		prey.alert_ticks = alert_memory        # a missed lunge puts prey on high alert
 		c.cooldown = pred_miss_cooldown
 
 ## Smooth functional response: the stability core.
