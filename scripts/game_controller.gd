@@ -42,7 +42,7 @@ func _process(delta: float) -> void:
 		guard += 1
 		if sim.tick_count % 500 == 0:
 			var ct := sim.counts()
-			print("tick %d | herb %d | pred %d" % [sim.tick_count, ct.x, ct.y])
+			print("tick %d | herb %d | pred %d | %s" % [sim.tick_count, ct.x, ct.y, sim.window_stats()])
 		if sim.creatures.is_empty():
 			if not extinction_announced:
 				print("EXTINCTION at tick %d" % sim.tick_count)

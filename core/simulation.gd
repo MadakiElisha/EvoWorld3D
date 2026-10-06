@@ -1,24 +1,29 @@
 class_name Simulation
 extends RefCounted
-## Headless ecosystem. No nodes, no visuals. Pure rules.
-## ALL balance knobs live at the top of this file.
+## Headless ecosystem: plants, herbivores, predators, evolution.
+## Pure logic and knobs. No nodes, no rendering, no printing.
+##
+## Predation follows the standard Holling cycle:
+##   encounter (movement) -> strike (PROBABILISTIC) -> handling (cooldown) -> conversion (energy)
+## The stochastic strike is the stability core: capture chance responds
+## smoothly to trait ratios, instead of flipping between "always catch"
+## and "never catch" like a deterministic chase.
 
-var world: WorldData
-var creatures: Array[CreatureData] = []
-var food: PackedFloat32Array
-var tick_count: int = 0
+# ---------------------------------------------------------------------------
+# PARAMETERS
+# ---------------------------------------------------------------------------
 
-# --- World / plants ---
+# --- plants ---
 var food_regrow := 0.006
-var forest_regrow_mult := 0.5
+var forest_regrow_mult := 0.65     # refuge rations (predators cannot see into forest)
 var food_max := 1.0
 
-# --- Population ---
+# --- population ---
 var start_herbs := 40
 var start_preds := 8
 var max_pop := 300
 
-# --- Herbivores ---
+# --- herbivores ---
 var eat_gain := 18.0
 var metabolism_cost := 0.6
 var move_cost := 0.25
@@ -26,26 +31,45 @@ var repro_energy := 110.0
 var repro_age := 40
 var max_age := 600
 var mutation := 0.15
-var panic_cost := 0.3        # extra burn per tick while fleeing
-var panic_speed_mult := 1.15 # flee sprint multiplier
-
-# --- Predators: heavy, expensive, born hunters ---
-var pred_repro_energy := 120.0
 var herb_baby_energy := 25.0
-var pred_baby_energy := 55.0
+
+# --- fear and stamina ---
+var fear_energy := 60.0           # below this, hunger overrides caution
+var panic_cost := 0.9             # sprint stamina burn per fleeing tick (chases must end)
+var panic_speed_mult := 1.15
+
+# --- predators ---
+var pred_repro_energy := 180.0
 var pred_repro_age := 60
+var pred_baby_energy := 55.0
+var pred_kill_fraction := 0.35
 var pred_kill_gain := 15.0
-var fear_energy := 50.0
-var pred_rival_cost := 0.12
-var pred_rival_radius := 2.5
-var pred_kill_fraction := 0.5
-var pred_catch_dist := 0.9
-var pred_cooldown := 12
-var pred_body_mult := 1.5
+var pred_strike_range := 2.4      # lunge range (no point-blank requirement)
+var pred_cooldown := 15           # handling time after a kill
+var pred_miss_cooldown := 6       # recovery after a missed lunge
+var pred_body_mult := 1.2
 var pred_leg_mult := 1.2
 var pred_innate_speed := 1.5
 var pred_innate_sense := 2.0
-var pred_hunt_mult := 1.5    # hunt radius = sense * this
+var pred_hunt_mult := 1.5
+var pred_step_mult := 1.3
+var pred_rival_cost := 0.25
+var pred_rival_radius := 2.5
+
+# ---------------------------------------------------------------------------
+# STATE
+# ---------------------------------------------------------------------------
+
+var world: WorldData
+var creatures: Array[CreatureData] = []
+var food: PackedFloat32Array
+var tick_count := 0
+
+# Measurement window counters (consumed by window_stats())
+var _w_kills := 0
+var _w_attempts := 0
+var _w_pred_births := 0
+var _w_pred_deaths := 0
 
 func _init(p_world: WorldData) -> void:
 	world = p_world
@@ -101,6 +125,14 @@ func make_creature(px: float, pz: float, parent: CreatureData) -> CreatureData:
 		c.energy = pred_baby_energy if parent.species == CreatureData.Species.PRED else herb_baby_energy
 	return c
 
+func make_baby(parent: CreatureData) -> CreatureData:
+	var bx := clampf(parent.x + randf_range(-0.7, 0.7), 0.5, world.width - 0.5)
+	var bz := clampf(parent.z + randf_range(-0.7, 0.7), 0.5, world.depth - 0.5)
+	if not world.is_walkable(int(floor(bx)), int(floor(bz))):
+		bx = parent.x
+		bz = parent.z
+	return make_creature(bx, bz, parent)
+
 func mutate(v: float) -> float:
 	return clampf(v + randf_range(-mutation, mutation), 0.2, 3.0)
 
@@ -125,10 +157,33 @@ func gene_averages(species: int) -> Vector3:
 		return Vector3.ZERO
 	return s / n
 
+## Predation internals for the last 500-tick window; resets on read.
+func window_stats() -> String:
+	var p := float(_w_kills) / maxf(float(_w_attempts), 1.0)
+	var s := "kills=%d att=%d p=%.2f pb=%d pd=%d" % [_w_kills, _w_attempts, p, _w_pred_births, _w_pred_deaths]
+	_w_kills = 0
+	_w_attempts = 0
+	_w_pred_births = 0
+	_w_pred_deaths = 0
+	return s
+
+# ---------------------------------------------------------------------------
+# TICK: named phases, in order
+# ---------------------------------------------------------------------------
+
 func tick() -> void:
 	tick_count += 1
+	_regrow_plants()
+	var babies: Array[CreatureData] = []
+	for c in creatures:
+		_age_and_burn(c)
+		_act(c)
+		_feed(c)
+		_reproduce(c, babies)
+		_check_death(c)
+	_survive_and_birth(babies)
 
-	# Plants regrow
+func _regrow_plants() -> void:
 	for i in food.size():
 		if food[i] < food_max:
 			var b := world.biomes[i]
@@ -137,120 +192,81 @@ func tick() -> void:
 			elif b == WorldData.Biome.FOREST:
 				food[i] = minf(food_max, food[i] + food_regrow * forest_regrow_mult)
 
-	var babies: Array[CreatureData] = []
-	for c in creatures:
-		c.age += 1
-		if c.cooldown > 0:
-			c.cooldown -= 1
+func _age_and_burn(c: CreatureData) -> void:
+	c.age += 1
+	if c.cooldown > 0:
+		c.cooldown -= 1
+	var body_mult := pred_body_mult if c.species == CreatureData.Species.PRED else 1.0
+	c.energy -= metabolism_cost * c.metabolism * body_mult
+	c.energy -= 0.05 * c.sense * c.sense * body_mult
+	if c.species == CreatureData.Species.PRED:
+		c.energy -= pred_rival_cost * _rival_count(c)
 
-		# Energy costs, species-aware
-		var body_mult := 1.0
-		var leg_mult := 1.0
+func _rival_count(c: CreatureData) -> int:
+	var n := 0
+	for o in creatures:
+		if o == c or o.species != CreatureData.Species.PRED or not o.alive:
+			continue
+		var dx := o.x - c.x
+		var dz := o.z - c.z
+		if dx * dx + dz * dz < pred_rival_radius * pred_rival_radius:
+			n += 1
+	return n
+
+func _act(c: CreatureData) -> void:
+	var moved := step_creature(c)
+	if moved > 0:
+		var leg_mult := pred_leg_mult if c.species == CreatureData.Species.PRED else 1.0
+		c.energy -= move_cost * c.metabolism * c.speed * c.speed * leg_mult
+	if moved == 2:
+		c.energy -= panic_cost
+	if c.species == CreatureData.Species.PRED and c.cooldown <= 0:
+		_try_strike(c)
+
+func _feed(c: CreatureData) -> void:
+	if c.species != CreatureData.Species.HERB:
+		return
+	var tx := int(floor(c.x))
+	var tz := int(floor(c.z))
+	if not world.in_bounds(tx, tz):
+		return
+	var i := world.idx(tx, tz)
+	if food[i] <= 0.05:
+		return
+	var bite := minf(food[i], 0.25 + 0.35 * c.metabolism)
+	food[i] -= bite
+	c.energy += bite * eat_gain * minf(1.0, c.metabolism * c.metabolism)
+
+func _reproduce(c: CreatureData, babies: Array[CreatureData]) -> void:
+	var is_pred := c.species == CreatureData.Species.PRED
+	var repro_e := pred_repro_energy if is_pred else repro_energy
+	var repro_a := pred_repro_age if is_pred else repro_age
+	if c.energy > repro_e and c.age > repro_a:
+		c.energy *= 0.5
+		babies.append(make_baby(c))
+		if is_pred:
+			_w_pred_births += 1
+
+func _check_death(c: CreatureData) -> void:
+	if c.energy <= 0.0 or c.age > max_age:
+		c.alive = false
 		if c.species == CreatureData.Species.PRED:
-			body_mult = pred_body_mult
-			leg_mult = pred_leg_mult
+			_w_pred_deaths += 1
 
-		c.energy -= metabolism_cost * c.metabolism * body_mult
-		c.energy -= 0.05 * c.sense * c.sense * body_mult
-		if c.species == CreatureData.Species.PRED:
-			var rivals := 0
-			for o in creatures:
-				if o == c or o.species != CreatureData.Species.PRED:
-					continue
-				var dx := o.x - c.x
-				var dz := o.z - c.z
-				if dx * dx + dz * dz < pred_rival_radius * pred_rival_radius:
-					rivals += 1
-			c.energy -= pred_rival_cost * rivals
-
-		var moved := step_creature(c)
-		if moved > 0:
-			c.energy -= move_cost * c.metabolism * c.speed * c.speed * leg_mult
-		if moved == 2:
-			c.energy -= panic_cost  # sprinting in fear is exhausting
-
-		# Feeding
-		if c.species == CreatureData.Species.HERB:
-			var tx := int(floor(c.x))
-			var tz := int(floor(c.z))
-			if world.in_bounds(tx, tz):
-				var fi := world.idx(tx, tz)
-				if food[fi] > 0.05:
-					var bite := minf(food[fi], 0.25 + 0.35 * c.metabolism)
-					food[fi] -= bite
-					var efficiency := minf(1.0, c.metabolism * c.metabolism)
-					c.energy += bite * eat_gain * efficiency
-		else:
-			try_kill(c)
-
-		# Reproduction
-		var repro_e := repro_energy if c.species == CreatureData.Species.HERB else pred_repro_energy
-		var repro_a := repro_age if c.species == CreatureData.Species.HERB else pred_repro_age
-		if c.energy > repro_e and c.age > repro_a:
-			c.energy *= 0.5
-			babies.append(make_baby(c))
-
-		# Death
-		if c.energy <= 0.0 or c.age > max_age:
-			c.alive = false
-
+func _survive_and_birth(babies: Array[CreatureData]) -> void:
 	var survivors: Array[CreatureData] = []
 	for c in creatures:
 		if c.alive:
 			survivors.append(c)
 	creatures = survivors
-
 	if creatures.size() < max_pop:
 		creatures.append_array(babies)
 
-func make_baby(parent: CreatureData) -> CreatureData:
-	var bx := clampf(parent.x + randf_range(-0.7, 0.7), 0.5, world.width - 0.5)
-	var bz := clampf(parent.z + randf_range(-0.7, 0.7), 0.5, world.depth - 0.5)
-	if not world.is_walkable(int(floor(bx)), int(floor(bz))):
-		bx = parent.x
-		bz = parent.z
-	return make_creature(bx, bz, parent)
+# ---------------------------------------------------------------------------
+# MOVEMENT AND BEHAVIOR
+# ---------------------------------------------------------------------------
 
-func nearest_predator(c: CreatureData, radius: float) -> CreatureData:
-	var best: CreatureData = null
-	var best_d := radius * radius
-	for o in creatures:
-		if o.species != CreatureData.Species.PRED or not o.alive:
-			continue
-		var dx := o.x - c.x
-		var dz := o.z - c.z
-		var d := dx * dx + dz * dz
-		if d < best_d:
-			best_d = d
-			best = o
-	return best
-
-func nearest_prey(c: CreatureData, radius: float) -> CreatureData:
-	var best: CreatureData = null
-	var best_d := radius * radius
-	for o in creatures:
-		if o.species != CreatureData.Species.HERB or not o.alive:
-			continue
-		if world.biome_at(int(floor(o.x)), int(floor(o.z))) == WorldData.Biome.FOREST:
-			continue  # canopy hides them; hunters wait in the open
-		var dx := o.x - c.x
-		var dz := o.z - c.z
-		var d := dx * dx + dz * dz
-		if d < best_d:
-			best_d = d
-			best = o
-	return best
-
-func try_kill(c: CreatureData) -> void:
-	if c.cooldown > 0:
-		return
-	var prey := nearest_prey(c, pred_catch_dist)
-	if prey != null:
-		c.energy += prey.energy * pred_kill_fraction + pred_kill_gain
-		prey.alive = false
-		c.cooldown = pred_cooldown
-
-## Returns: 0 = stayed, 1 = moved, 2 = moved while fleeing
+## Returns 0 = stayed, 1 = moved, 2 = moved while fleeing.
 func step_creature(c: CreatureData) -> int:
 	var desired := Vector2.ZERO
 	var fleeing := false
@@ -259,8 +275,8 @@ func step_creature(c: CreatureData) -> int:
 		var safe := world.biome_at(int(floor(c.x)), int(floor(c.z))) == WorldData.Biome.FOREST
 		var desperate := c.energy < fear_energy
 		var threat: CreatureData = null
-		if not safe and not desperate:
-			threat = nearest_predator(c, c.sense + 0.5)
+		if not safe:
+			threat = nearest_predator(c, 1.8 if desperate else c.sense + 0.5)
 		if threat != null:
 			desired = Vector2(c.x - threat.x, c.z - threat.z)
 			fleeing = true
@@ -282,6 +298,8 @@ func step_creature(c: CreatureData) -> int:
 	desired = desired.normalized()
 
 	var step_len := 0.3 * c.speed
+	if c.species == CreatureData.Species.PRED:
+		step_len *= pred_step_mult
 	if fleeing:
 		step_len *= panic_speed_mult
 
@@ -318,3 +336,81 @@ func seek_food(c: CreatureData) -> Vector2:
 	if best_d > 999999.0:
 		return Vector2.ZERO
 	return best_pos - Vector2(c.x, c.z)
+
+# ---------------------------------------------------------------------------
+# PREDATION: encounter -> strike -> handling -> conversion
+# ---------------------------------------------------------------------------
+
+func nearest_predator(c: CreatureData, radius: float) -> CreatureData:
+	var best: CreatureData = null
+	var best_d := radius * radius
+	for o in creatures:
+		if o.species != CreatureData.Species.PRED or not o.alive:
+			continue
+		var dx := o.x - c.x
+		var dz := o.z - c.z
+		var d := dx * dx + dz * dz
+		if d < best_d:
+			best_d = d
+			best = o
+	return best
+
+func nearest_prey(c: CreatureData, radius: float) -> CreatureData:
+	var best: CreatureData = null
+	var best_d := radius * radius
+	for o in creatures:
+		if o.species != CreatureData.Species.HERB or not o.alive:
+			continue
+		if world.biome_at(int(floor(o.x)), int(floor(o.z))) == WorldData.Biome.FOREST:
+			continue  # canopy hides them; hunters work the open ground
+		var dx := o.x - c.x
+		var dz := o.z - c.z
+		var d := dx * dx + dz * dz
+		if d < best_d:
+			best_d = d
+			best = o
+	return best
+
+func _try_strike(c: CreatureData) -> void:
+	var prey := nearest_prey(c, pred_strike_range)
+	if prey == null:
+		return
+	var dx := prey.x - c.x
+	var dz := prey.z - c.z
+	var d := sqrt(dx * dx + dz * dz)
+	_w_attempts += 1
+	var p := capture_probability(c, prey) * clampf(1.0 - 0.5 * d / pred_strike_range, 0.0, 1.0)
+	if randf() < p:
+		_kill(c, prey)
+	else:
+		_escape_burst(prey, c)
+		c.cooldown = pred_miss_cooldown
+
+## Smooth functional response: the stability core.
+## r = predator effective speed / fleeing prey effective speed.
+## p slides from 0.05 (r=0.75) through 0.5 (r=1.0) to 0.95 (r=1.25).
+func capture_probability(pred: CreatureData, prey: CreatureData) -> float:
+	var pred_eff := pred.speed * pred_step_mult
+	var prey_eff := prey.speed * panic_speed_mult
+	var r := pred_eff / maxf(prey_eff, 0.01)
+	return clampf(0.5 + 1.8 * (r - 1.0), 0.05, 0.95)
+
+func _kill(pred: CreatureData, prey: CreatureData) -> void:
+	pred.energy += prey.energy * pred_kill_fraction + pred_kill_gain
+	prey.alive = false
+	pred.cooldown = pred_cooldown
+	_w_kills += 1
+
+func _escape_burst(prey: CreatureData, pred: CreatureData) -> void:
+	var away := Vector2(prey.x - pred.x, prey.z - pred.z)
+	if away.length_squared() < 0.0001:
+		away = Vector2.RIGHT
+	away = away.normalized().rotated(randf_range(-0.7, 0.7))
+	for reach in [2.0, 1.2, 0.6]:
+		var nx := clampf(prey.x + away.x * reach, 0.5, world.width - 0.5)
+		var nz := clampf(prey.z + away.y * reach, 0.5, world.depth - 0.5)
+		if world.is_walkable(int(floor(nx)), int(floor(nz))):
+			prey.x = nx
+			prey.z = nz
+			break
+	prey.energy -= 4.0
