@@ -20,7 +20,7 @@ var food_max := 1.0
 
 # --- population ---
 var start_herbs := 40
-var start_preds := 8
+var start_preds := 12
 var max_pop := 300
 
 # --- herbivores ---
@@ -39,9 +39,9 @@ var panic_cost := 0.9             # sprint stamina burn per fleeing tick (chases
 var panic_speed_mult := 1.15
 
 # --- predators ---
-var pred_repro_energy := 180.0
+var pred_repro_energy := 140.0
 var pred_repro_age := 60
-var pred_baby_energy := 55.0
+var pred_baby_energy := 70.0
 var pred_kill_fraction := 0.35
 var pred_kill_gain := 15.0
 var pred_strike_range := 2.4      # lunge range (no point-blank requirement)
