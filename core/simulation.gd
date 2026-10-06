@@ -37,6 +37,7 @@ var herb_baby_energy := 25.0
 var fear_energy := 60.0
 var panic_cost := 0.9
 var panic_speed_mult := 1.15
+var vigilance_graze_penalty := 0.5   # head-up grazers get half a mouthful
 
 # --- predators ---
 var pred_repro_energy := 140.0
@@ -53,11 +54,11 @@ var pred_innate_speed := 1.5
 var pred_innate_sense := 2.0
 var pred_hunt_mult := 1.5
 var pred_step_mult := 1.3
-var pred_rival_cost := 0.25
+var pred_rival_cost := 0.35
 var pred_rival_radius := 2.5
 
 # --- ambush / vigilance ---
-var ambush_p := 0.85
+var ambush_p := 0.75
 var alert_memory := 30
 
 # ---------------------------------------------------------------------------
@@ -253,6 +254,8 @@ func _feed(c: CreatureData) -> void:
 	if food[i] <= 0.05:
 		return
 	var bite := minf(food[i], 0.25 + 0.35 * c.metabolism)
+	if c.alert_ticks > 0:
+		bite *= vigilance_graze_penalty
 	food[i] -= bite
 	c.energy += bite * eat_gain * minf(1.0, c.metabolism * c.metabolism)
 
