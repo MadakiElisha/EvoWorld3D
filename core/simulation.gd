@@ -477,6 +477,10 @@ func spawn_preds(n: int) -> void:
 				c.species = CreatureData.Species.PRED
 				c.energy = 80.0
 				c.age = randi_range(0, 200)
+				if donor == null:
+					# captive-bred stock: matched to current prey, not naive defaults
+					c.speed = clampf(gene_averages(CreatureData.Species.HERB).x * 0.95, 0.2, 3.0)
+					c.sense = 2.0
 				creatures.append(c)
 				break
 
@@ -484,6 +488,15 @@ func cull_preds(fraction: float) -> void:
 	var targets: Array[CreatureData] = []
 	for c in creatures:
 		if c.species == CreatureData.Species.PRED:
+			targets.append(c)
+	targets.shuffle()
+	for i in int(targets.size() * fraction):
+		targets[i].alive = false
+
+func cull_herbs(fraction: float) -> void:
+	var targets: Array[CreatureData] = []
+	for c in creatures:
+		if c.species == CreatureData.Species.HERB:
 			targets.append(c)
 	targets.shuffle()
 	for i in int(targets.size() * fraction):

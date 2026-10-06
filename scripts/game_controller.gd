@@ -46,6 +46,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_C:
 				sim.cull_preds(0.4)
 				print("GOD: culled 40% of predators")
+			KEY_D:
+				sim.cull_herbs(0.4)
+				print("GOD: culled 40% of herbivores")
 
 func _process(delta: float) -> void:
 	acc += delta * BASE_TPS * time_scale
