@@ -1,0 +1,44 @@
+[gd_scene format=3 uid="uid://maj7mjqljjjm"]
+
+[ext_resource type="Script" uid="uid://cxyj6rwqn2256" path="res://scripts/game_controller.gd" id="1_0wfyh"]
+[ext_resource type="Script" uid="uid://bpuf07mavowbm" path="res://scripts/orbit_camera.gd" id="2_sugp2"]
+[ext_resource type="Script" uid="uid://dhkiklrrphyr3" path="res://scripts/hud.gd" id="3_sugp2"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_q1lm7"]
+sky_top_color = Color(0.2509804, 0.4509804, 0.8509804, 1)
+sky_horizon_color = Color(0.7019608, 0.8, 0.9490196, 1)
+ground_bottom_color = Color(0.2509804, 0.4, 0.6509804, 1)
+ground_horizon_color = Color(0.7019608, 0.8, 0.9490196, 1)
+
+[sub_resource type="Sky" id="Sky_mf2on"]
+sky_material = SubResource("ProceduralSkyMaterial_q1lm7")
+
+[sub_resource type="Environment" id="Environment_7m0mv"]
+background_mode = 2
+sky = SubResource("Sky_mf2on")
+ambient_light_source = 3
+ambient_light_energy = 0.4
+tonemap_mode = 2
+
+[node name="Main" type="Node3D" unique_id=2082690526]
+script = ExtResource("1_0wfyh")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1865429774]
+script = ExtResource("2_sugp2")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1607884778]
+transform = Transform3D(0.8660254, 0.40957603, -0.28678823, 0, 0.57357645, 0.81915206, 0.5, -0.7094065, 0.49673176, 0, 0, 0)
+shadow_enabled = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=238707407]
+environment = SubResource("Environment_7m0mv")
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=422836105]
+
+[node name="Graph" type="Control" parent="HUD" unique_id=1216649805]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+mouse_filter = 2
+script = ExtResource("3_sugp2")
