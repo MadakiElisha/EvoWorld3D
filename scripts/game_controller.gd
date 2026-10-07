@@ -25,6 +25,14 @@ var lab: BalanceLab = null
 var fp_index := -1
 var pixel_noise: ImageTexture
 
+var trunk_mm: MultiMeshInstance3D
+var leaf_mm: MultiMeshInstance3D
+var accent_mm: MultiMeshInstance3D
+var rock_mm: MultiMeshInstance3D
+var tuft_mm: MultiMeshInstance3D
+var cap_mm: MultiMeshInstance3D
+var water_mm: MultiMeshInstance3D
+
 const BASE_TPS := 8.0
 const MAX_POP := 800
 
@@ -33,8 +41,9 @@ func _ready() -> void:
 	add_child(visual_root)
 	restart()
 	pixel_noise = make_pixel_noise(8, 0.6, 1.0)
-	_apply_pixel_look()
 	_setup_atmosphere()
+	build_props()
+	_apply_pixel_look()
 
 func _setup_atmosphere() -> void:
 	var sun := get_node_or_null("DirectionalLight3D") as DirectionalLight3D
@@ -79,6 +88,69 @@ func _apply_pixel_look() -> void:
 		mat.albedo_texture = pixel_noise
 		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 		mat.vertex_color_use_as_albedo = true
+		mat.albedo_color = mat.albedo_color.lerp(Color(0.55, 0.55, 0.55), 0.3)
+
+func _make_prop_mesh(color: Color, cap: int) -> MultiMeshInstance3D:
+	var mi := MultiMeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(1, 1, 1)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	bm.material = mat
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.instance_count = cap
+	mm.mesh = bm
+	mi.multimesh = mm
+	add_child(mi)
+	return mi
+
+func _zero_fill(mi: MultiMeshInstance3D, from: int, to: int) -> void:
+	for j in range(from, to):
+		mi.multimesh.set_instance_transform(j, Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO))
+
+func build_props() -> void:
+	if trunk_mm == null:
+		trunk_mm = _make_prop_mesh(Color(0.35, 0.22, 0.12), 400)
+		leaf_mm = _make_prop_mesh(Color(0.15, 0.5, 0.18), 800)
+		accent_mm = _make_prop_mesh(Color(0.9, 0.4, 0.6), 400)
+		rock_mm = _make_prop_mesh(Color(0.45, 0.45, 0.48), 300)
+		tuft_mm = _make_prop_mesh(Color(0.4, 0.75, 0.3), 600)
+		water_mm = _make_prop_mesh(Color(0.2, 0.5, 0.9), 2000)
+		var wmat := water_mm.multimesh.mesh.material as StandardMaterial3D
+		wmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		wmat.albedo_color = Color(0.2, 0.5, 0.9, 0.55)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = world_seed
+	var ti := 0; var li := 0; var ai := 0; var ri := 0; var ui := 0; var ci := 0; var wi := 0
+	for x in world.width:
+		for z in world.depth:
+			var b := world.biome_at(x, z)
+			var wx := x - world.width / 2.0 + 0.5
+			var wz := z - world.depth / 2.0 + 0.5
+			var y := world.height_at(x, z)
+			if b == WorldData.Biome.WATER:
+				if wi < 2000:
+					water_mm.multimesh.set_instance_transform(wi, Transform3D(Basis().scaled(Vector3(0.98, 0.06, 0.98)), Vector3(wx, y + 0.42, wz))); wi += 1
+				continue
+			var r := rng.randf()
+			if b == WorldData.Biome.FOREST and r < 0.10 and ti < 400 and li < 798:
+				trunk_mm.multimesh.set_instance_transform(ti, Transform3D(Basis(), Vector3(wx, y + 0.6, wz))); ti += 1
+				leaf_mm.multimesh.set_instance_transform(li, Transform3D(Basis().scaled(Vector3(1.5, 1.0, 1.5)), Vector3(wx, y + 1.5, wz))); li += 1
+				leaf_mm.multimesh.set_instance_transform(li, Transform3D(Basis().scaled(Vector3(1.0, 0.8, 1.0)), Vector3(wx, y + 2.2, wz))); li += 1
+			elif b == WorldData.Biome.GRASS:
+				if r < 0.05 and ai < 400:
+					accent_mm.multimesh.set_instance_transform(ai, Transform3D(Basis().scaled(Vector3(0.18, 0.25, 0.18)), Vector3(wx, y + 0.12, wz))); ai += 1
+				elif r < 0.2 and ui < 600:
+					tuft_mm.multimesh.set_instance_transform(ui, Transform3D(Basis().scaled(Vector3(0.3, 0.2, 0.3)), Vector3(wx, y + 0.1, wz))); ui += 1
+			elif r < 0.08 and ri < 300:
+				rock_mm.multimesh.set_instance_transform(ri, Transform3D(Basis().scaled(Vector3(0.6, 0.4, 0.6)), Vector3(wx, y + 0.15, wz))); ri += 1
+	_zero_fill(trunk_mm, ti, 400)
+	_zero_fill(leaf_mm, li, 800)
+	_zero_fill(accent_mm, ai, 400)
+	_zero_fill(rock_mm, ri, 300)
+	_zero_fill(tuft_mm, ui, 600)
+	_zero_fill(water_mm, wi, 2000)
 		
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed:
@@ -172,6 +244,7 @@ func restart() -> void:
 	sim = Simulation.new(world)
 	build_terrain_visual()
 	build_creature_visual()
+	build_props()
 	print("World %dx%d seed=%d | creatures=%d" % [world.width, world.depth, world.world_seed, sim.creatures.size()])
 	get_node("Camera3D").set_process(true)
 
