@@ -34,6 +34,22 @@ func _ready() -> void:
 	restart()
 	pixel_noise = make_pixel_noise(8, 0.6, 1.0)
 	_apply_pixel_look()
+	_setup_atmosphere()
+
+func _setup_atmosphere() -> void:
+	var sun := get_node_or_null("DirectionalLight3D") as DirectionalLight3D
+	if sun != null:
+		sun.light_color = Color(1.0, 0.95, 0.85)
+		sun.light_energy = 1.15
+		sun.shadow_enabled = true
+		sun.rotation_degrees = Vector3(-55, 0, 35)
+	var we := get_node_or_null("WorldEnvironment") as WorldEnvironment
+	if we != null and we.environment != null:
+		var env := we.environment
+		env.tonemap_mode = Environment.TONE_MAPPER_ACES
+		env.fog_enabled = true
+		env.fog_light_color = Color(0.7, 0.82, 0.95)
+		env.fog_density = 0.002
 
 func make_pixel_noise(size := 16, lo := 0.78, hi := 1.0) -> ImageTexture:
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
@@ -45,15 +61,20 @@ func make_pixel_noise(size := 16, lo := 0.78, hi := 1.0) -> ImageTexture:
 
 func _apply_pixel_look() -> void:
 	for child in get_children():
+		var mesh: Mesh = null
 		if child is MultiMeshInstance3D:
-			var mesh: Mesh = child.multimesh.mesh
-			var mat := mesh.material as StandardMaterial3D
-			if mat == null:
-				mat = StandardMaterial3D.new()
-				mesh.material = mat
-			mat.albedo_texture = pixel_noise
-			mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-			mat.vertex_color_use_as_albedo = true
+			mesh = child.multimesh.mesh
+		elif child is MeshInstance3D:
+			mesh = child.mesh
+		if mesh == null:
+			continue
+		var mat := mesh.material as StandardMaterial3D
+		if mat == null:
+			mat = StandardMaterial3D.new()
+			mesh.material = mat
+		mat.albedo_texture = pixel_noise
+		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		mat.vertex_color_use_as_albedo = true
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed:
