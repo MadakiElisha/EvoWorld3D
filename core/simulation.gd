@@ -352,6 +352,7 @@ func step_creature(c: CreatureData) -> int:
 	if not blocked:
 		c.x = nx
 		c.z = nz
+		c.heading = atan2(desired.x, desired.y)
 		return 2 if fleeing else 1
 	return 0
 

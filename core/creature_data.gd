@@ -16,6 +16,7 @@ var alert_ticks := 0   # vigilance memory: >0 = head up; 0 = grazing (ambushable
 var threat: CreatureData = null   # cached nearest predator (herbivores)
 var target: CreatureData = null   # cached nearest prey (predators)
 var scan_timer := 0
+var heading: float = 0.0   # yaw the body faces (radians)
 
 # Genes (mutate on reproduction)
 var speed: float = 1.0

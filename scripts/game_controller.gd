@@ -18,6 +18,7 @@ var creature_mm: MultiMesh
 var acc := 0.0
 var extinction_announced := false
 var lab: BalanceLab = null
+var fp_index := -1
 
 const BASE_TPS := 8.0
 const MAX_POP := 800
@@ -58,6 +59,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				world_seed = CURATED_SEEDS[curated_idx]
 				outcome = ""
 				restart()
+			KEY_V:
+				if fp_index < 0:
+					fp_index = 0
+					get_node("Camera3D").set_process(false)
+				else:
+					fp_index = -1
+					get_node("Camera3D").set_process(true)
 
 func _process(delta: float) -> void:
 	if outcome != "":
@@ -87,9 +95,21 @@ func _process(delta: float) -> void:
 		elif sim.tick_count >= 10000 and ct.x > 0 and ct.y > 0:
 			outcome = "STEWARD"
 	render_creatures()
+	
+	if fp_index >= 0 and sim.creatures.size() > 0:
+		if fp_index >= sim.creatures.size():
+			fp_index = 0
+		var fc := sim.creatures[fp_index]
+		var ftx := int(floor(fc.x))
+		var ftz := int(floor(fc.z))
+		var fy := world.height_at(ftx, ftz) + 0.6
+		var fwx := fc.x - world.width / 2.0
+		var fwz := fc.z - world.depth / 2.0
+		get_node("Camera3D").global_transform = Transform3D(Basis(Vector3.UP, fc.heading + PI), Vector3(fwx, fy, fwz))
 
 func restart() -> void:
 	outcome = ""
+	fp_index = -1
 	for child in visual_root.get_children():
 		child.queue_free()
 	extinction_announced = false
@@ -98,6 +118,7 @@ func restart() -> void:
 	build_terrain_visual()
 	build_creature_visual()
 	print("World %dx%d seed=%d | creatures=%d" % [world.width, world.depth, world.world_seed, sim.creatures.size()])
+	get_node("Camera3D").set_process(true)
 
 func build_terrain_visual() -> void:
 	var mm := MultiMesh.new()
@@ -132,7 +153,7 @@ func build_creature_visual() -> void:
 	creature_mm.transform_format = MultiMesh.TRANSFORM_3D
 	creature_mm.use_colors = true
 	var box := BoxMesh.new()
-	box.size = Vector3(0.45, 0.45, 0.45)
+	box.size = Vector3(0.4, 0.35, 0.7)   # long axis = forward
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
 	box.material = mat
@@ -155,11 +176,12 @@ func render_creatures() -> void:
 		var wx := c.x - world.width / 2.0
 		var wz := c.z - world.depth / 2.0
 		var e := clampf(c.energy / 100.0, 0.0, 1.0)
+		var facing := Basis(Vector3.UP, c.heading)
 		if c.species == CreatureData.Species.PRED:
-			var basis := Basis().scaled(Vector3(1.35, 1.35, 1.35))
+			var basis := facing.scaled(Vector3(1.35, 1.35, 1.35))
 			creature_mm.set_instance_transform(i, Transform3D(basis, Vector3(wx, y + 0.1, wz)))
 			creature_mm.set_instance_color(i, Color.from_hsv(0.86, 0.9, 0.45 + 0.55 * e))
 		else:
-			creature_mm.set_instance_transform(i, Transform3D(Basis(), Vector3(wx, y, wz)))
+			creature_mm.set_instance_transform(i, Transform3D(facing, Vector3(wx, y, wz)))
 			var hue := 0.05 + 0.33 * (1.0 - clampf((c.speed - 0.2) / 2.8, 0.0, 1.0))
 			creature_mm.set_instance_color(i, Color.from_hsv(hue, 0.85, 0.45 + 0.55 * e))
