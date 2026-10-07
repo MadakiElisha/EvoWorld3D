@@ -42,7 +42,7 @@ func _setup_atmosphere() -> void:
 		sun.light_color = Color(1.0, 0.95, 0.85)
 		sun.light_energy = 1.15
 		sun.shadow_enabled = true
-		sun.rotation_degrees = Vector3(-55, 0, 35)
+		sun.rotation_degrees = Vector3(-38, 0, 30)
 	var we := get_node_or_null("WorldEnvironment") as WorldEnvironment
 	if we != null and we.environment != null:
 		var env := we.environment
@@ -50,6 +50,7 @@ func _setup_atmosphere() -> void:
 		env.fog_enabled = true
 		env.fog_light_color = Color(0.7, 0.82, 0.95)
 		env.fog_density = 0.002
+		env.fog_sky_affect = false
 
 func make_pixel_noise(size := 16, lo := 0.78, hi := 1.0) -> ImageTexture:
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
@@ -60,12 +61,15 @@ func make_pixel_noise(size := 16, lo := 0.78, hi := 1.0) -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 func _apply_pixel_look() -> void:
-	for child in get_children():
+	var nodes: Array = []
+	nodes.append_array(find_children("*", "MultiMeshInstance3D"))
+	nodes.append_array(find_children("*", "MeshInstance3D"))
+	for node in nodes:
 		var mesh: Mesh = null
-		if child is MultiMeshInstance3D:
-			mesh = child.multimesh.mesh
-		elif child is MeshInstance3D:
-			mesh = child.mesh
+		if node is MultiMeshInstance3D:
+			mesh = node.multimesh.mesh
+		elif node is MeshInstance3D:
+			mesh = node.mesh
 		if mesh == null:
 			continue
 		var mat := mesh.material as StandardMaterial3D
@@ -75,7 +79,7 @@ func _apply_pixel_look() -> void:
 		mat.albedo_texture = pixel_noise
 		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 		mat.vertex_color_use_as_albedo = true
-
+		
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed:
 		match event.keycode:
