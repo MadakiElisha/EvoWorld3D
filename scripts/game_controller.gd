@@ -3,9 +3,13 @@ extends Node3D
 
 @export var width := 48
 @export var depth := 48
-@export var world_seed := 1337
+@export var world_seed := 524274379   # a known-good island as the front door
 @export var max_height := 8
 @export var time_scale := 1
+
+const CURATED_SEEDS := [524274379, 2655256772, 819918188]
+var curated_idx := 0
+var outcome := ""
 
 var world: WorldData
 var sim: Simulation
@@ -49,6 +53,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_D:
 				sim.cull_herbs(0.4)
 				print("GOD: culled 40% of herbivores")
+			KEY_N:
+				curated_idx = (curated_idx + 1) % CURATED_SEEDS.size()
+				world_seed = CURATED_SEEDS[curated_idx]
+				outcome = ""
+				restart()
 
 func _process(delta: float) -> void:
 	acc += delta * BASE_TPS * time_scale
@@ -69,6 +78,12 @@ func _process(delta: float) -> void:
 	if lab != null:
 		if not lab.step():
 			lab = null
+	if outcome == "":
+		var ct := sim.counts()
+		if sim.creatures.is_empty():
+			outcome = "COLLAPSE"
+		elif sim.tick_count >= 10000 and ct.x > 0 and ct.y > 0:
+			outcome = "STEWARD"
 	render_creatures()
 
 func restart() -> void:
