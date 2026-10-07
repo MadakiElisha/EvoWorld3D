@@ -16,6 +16,7 @@ var sim: Simulation
 var visual_root: Node3D
 var creature_mm: MultiMesh
 var head_mm: MultiMeshInstance3D
+var leg_mm: MultiMeshInstance3D
 var acc := 0.0
 var extinction_announced := false
 var lab: BalanceLab = null
@@ -178,11 +179,23 @@ func build_creature_visual() -> void:
 	head_mult.mesh = head_mesh
 	head_mm.multimesh = head_mult
 	add_child(head_mm)
+	
+	leg_mm = MultiMeshInstance3D.new()
+	var leg_mesh := BoxMesh.new()
+	leg_mesh.size = Vector3(0.14, 0.12, 0.5)
+	var leg_mat := StandardMaterial3D.new()
+	leg_mat.albedo_color = Color(0.15, 0.1, 0.08)
+	leg_mesh.material = leg_mat
+	var leg_mult := MultiMesh.new()
+	leg_mult.transform_format = MultiMesh.TRANSFORM_3D
+	leg_mult.instance_count = MAX_POP
+	leg_mult.mesh = leg_mesh
+	leg_mm.multimesh = leg_mult
+	add_child(leg_mm)
 
 func render_creatures() -> void:
 	var n := sim.creatures.size()
 	creature_mm.visible_instance_count = n
-	head_mm.visible_instance_count = n
 	for i in n:
 		var c := sim.creatures[i]
 		var tx := int(floor(c.x))
@@ -205,4 +218,12 @@ func render_creatures() -> void:
 		var forward := Vector3(sin(c.heading), 0.0, cos(c.heading))
 		var head_scale := 0.6 + 0.6 * clampf(c.sense / 3.0, 0.0, 1.0)
 		var head_basis := Basis(Vector3.UP, c.heading).scaled(Vector3(head_scale, head_scale, head_scale))
-		head_mm.set_instance_transform(i, Transform3D(head_basis, Vector3(wx, by, wz) + forward * 0.3 + Vector3.UP * 0.22))
+		head_mm.multimesh.set_instance_transform(i, Transform3D(head_basis, Vector3(wx, by, wz) + forward * 0.3 + Vector3.UP * 0.22))
+		var phase := fmod(c.distance_walked * 3.0, TAU)
+		var leg_lift := absf(sin(phase)) * 0.06
+		var leg_slide := cos(phase) * 0.08
+		leg_mm.multimesh.set_instance_transform(i, Transform3D(facing, Vector3(wx, by - 0.24 + leg_lift, wz) + forward * leg_slide))
+		
+	for j in range(n, MAX_POP):
+		head_mm.multimesh.set_instance_transform(j, Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO))
+		leg_mm.multimesh.set_instance_transform(j, Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO))

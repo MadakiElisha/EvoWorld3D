@@ -350,6 +350,8 @@ func step_creature(c: CreatureData) -> int:
 	if not blocked and c.species == CreatureData.Species.PRED:
 		blocked = world.biome_at(ntx, ntz) == WorldData.Biome.FOREST
 	if not blocked:
+		var moved := sqrt((nx - c.x) * (nx - c.x) + (nz - c.z) * (nz - c.z))
+		c.distance_walked += moved
 		c.x = nx
 		c.z = nz
 		c.heading = atan2(desired.x, desired.y)
