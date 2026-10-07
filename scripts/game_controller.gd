@@ -15,6 +15,7 @@ var world: WorldData
 var sim: Simulation
 var visual_root: Node3D
 var creature_mm: MultiMesh
+var head_mm: MultiMeshInstance3D
 var acc := 0.0
 var extinction_announced := false
 var lab: BalanceLab = null
@@ -164,10 +165,24 @@ func build_creature_visual() -> void:
 	var mmi := MultiMeshInstance3D.new()
 	mmi.multimesh = creature_mm
 	visual_root.add_child(mmi)
+	
+	head_mm = MultiMeshInstance3D.new()
+	var head_mesh := BoxMesh.new()
+	head_mesh.size = Vector3(0.22, 0.18, 0.16)
+	var head_mat := StandardMaterial3D.new()
+	head_mat.albedo_color = Color(0.08, 0.08, 0.1)
+	head_mesh.material = head_mat
+	var head_mult := MultiMesh.new()
+	head_mult.transform_format = MultiMesh.TRANSFORM_3D
+	head_mult.instance_count = MAX_POP
+	head_mult.mesh = head_mesh
+	head_mm.multimesh = head_mult
+	add_child(head_mm)
 
 func render_creatures() -> void:
 	var n := sim.creatures.size()
 	creature_mm.visible_instance_count = n
+	head_mm.visible_instance_count = n
 	for i in n:
 		var c := sim.creatures[i]
 		var tx := int(floor(c.x))
@@ -177,11 +192,17 @@ func render_creatures() -> void:
 		var wz := c.z - world.depth / 2.0
 		var e := clampf(c.energy / 100.0, 0.0, 1.0)
 		var facing := Basis(Vector3.UP, c.heading)
+		var by := y
 		if c.species == CreatureData.Species.PRED:
+			by = y + 0.1
 			var basis := facing.scaled(Vector3(1.35, 1.35, 1.35))
-			creature_mm.set_instance_transform(i, Transform3D(basis, Vector3(wx, y + 0.1, wz)))
+			creature_mm.set_instance_transform(i, Transform3D(basis, Vector3(wx, by, wz)))
 			creature_mm.set_instance_color(i, Color.from_hsv(0.86, 0.9, 0.45 + 0.55 * e))
 		else:
-			creature_mm.set_instance_transform(i, Transform3D(facing, Vector3(wx, y, wz)))
+			creature_mm.set_instance_transform(i, Transform3D(facing, Vector3(wx, by, wz)))
 			var hue := 0.05 + 0.33 * (1.0 - clampf((c.speed - 0.2) / 2.8, 0.0, 1.0))
 			creature_mm.set_instance_color(i, Color.from_hsv(hue, 0.85, 0.45 + 0.55 * e))
+		var forward := Vector3(sin(c.heading), 0.0, cos(c.heading))
+		var head_scale := 0.6 + 0.6 * clampf(c.sense / 3.0, 0.0, 1.0)
+		var head_basis := Basis(Vector3.UP, c.heading).scaled(Vector3(head_scale, head_scale, head_scale))
+		head_mm.set_instance_transform(i, Transform3D(head_basis, Vector3(wx, by, wz) + forward * 0.3 + Vector3.UP * 0.22))
