@@ -63,6 +63,11 @@ var scan_interval := 4
 var ambush_p := 0.85
 var alert_memory := 30
 
+var brain_mode := 0   # 0 = hand-written reflexes, 1 = evolved neural net
+const B_IN := 6
+const B_HID := 6
+const B_OUT := 2
+
 # ---------------------------------------------------------------------------
 # STATE
 # ---------------------------------------------------------------------------
@@ -89,6 +94,49 @@ func _init(p_world: WorldData) -> void:
 	food.resize(world.width * world.depth)
 	seed_food()
 	spawn_initial()
+
+func make_random_brain() -> PackedFloat32Array:
+	var w := PackedFloat32Array()
+	w.resize(B_IN * B_HID + B_HID + B_HID * B_OUT + B_OUT)
+	for i in w.size():
+		w[i] = randf_range(-1.0, 1.0)
+	return w
+
+func mutate_brain(src: PackedFloat32Array) -> PackedFloat32Array:
+	var w := src.duplicate()
+	for i in w.size():
+		if randf() < 0.12:
+			w[i] = clampf(w[i] + randf_range(-0.4, 0.4), -3.0, 3.0)
+	return w
+
+func brain_think(c: CreatureData) -> Vector2:
+	var food := Vector2.ZERO
+	var other := Vector2.ZERO
+	if c.species == CreatureData.Species.HERB:
+		var sf := seek_food(c)
+		if sf.length_squared() > 0.0001:
+			food = sf.normalized()
+		var t := nearest_predator(c, c.sense + 0.5)
+		if t != null:
+			other = Vector2(t.x - c.x, t.z - c.z).normalized()
+	else:
+		var p := nearest_prey(c, c.sense * pred_hunt_mult)
+		if p != null:
+			other = Vector2(p.x - c.x, p.z - c.z).normalized()
+	var inputs := [food.x, food.y, other.x, other.y, clampf(c.energy / 150.0, 0.0, 1.0) * 2.0 - 1.0, 1.0]
+	var h := [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+	for j in B_HID:
+		var s := 0.0
+		for i in B_IN:
+			s += inputs[i] * c.brain[i * B_HID + j]
+		h[j] = tanh(s + c.brain[B_IN * B_HID + j])
+	var out := [0.0, 0.0]
+	for k in B_OUT:
+		var s2 := 0.0
+		for j in B_HID:
+			s2 += h[j] * c.brain[B_IN * B_HID + B_HID + j * B_OUT + k]
+		out[k] = tanh(s2 + c.brain[B_IN * B_HID + B_HID + B_HID * B_OUT + k])
+	return Vector2(out[0], out[1])
 
 func seed_food() -> void:
 	for x in world.width:
@@ -135,6 +183,10 @@ func make_creature(px: float, pz: float, parent: CreatureData) -> CreatureData:
 		c.sense = mutate(parent.sense)
 		c.metabolism = mutate(parent.metabolism)
 		c.energy = pred_baby_energy if parent.species == CreatureData.Species.PRED else herb_baby_energy
+	if parent != null and parent.brain.size() > 0:
+		c.brain = mutate_brain(parent.brain)
+	else:
+		c.brain = make_random_brain()
 	return c
 
 func make_baby(parent: CreatureData) -> CreatureData:
@@ -297,7 +349,9 @@ func step_creature(c: CreatureData) -> int:
 	var desired := Vector2.ZERO
 	var fleeing := false
 
-	if c.species == CreatureData.Species.HERB:
+	if brain_mode == 1:
+		desired = brain_think(c)
+	elif c.species == CreatureData.Species.HERB:
 		var safe := world.biome_at(int(floor(c.x)), int(floor(c.z))) == WorldData.Biome.FOREST
 		var desperate := c.energy < fear_energy
 		if c.scan_timer <= 0:

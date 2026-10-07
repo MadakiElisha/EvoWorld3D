@@ -68,6 +68,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				else:
 					fp_index = -1
 					get_node("Camera3D").set_process(true)
+			KEY_B:
+				sim.brain_mode = 1 - sim.brain_mode
+				print("GOD: brain_mode = %d" % sim.brain_mode)
 
 func _process(delta: float) -> void:
 	if outcome != "":

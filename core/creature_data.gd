@@ -23,3 +23,4 @@ var distance_walked := 0.0
 var speed: float = 1.0
 var sense: float = 1.5
 var metabolism: float = 1.0
+var brain := PackedFloat32Array()   # 56 weights: 6 sensors -> 6 hidden -> 2 motor
