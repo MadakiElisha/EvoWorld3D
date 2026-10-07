@@ -102,6 +102,23 @@ func make_random_brain() -> PackedFloat32Array:
 		w[i] = randf_range(-1.0, 1.0)
 	return w
 
+func make_prior_brain(sp: int) -> PackedFloat32Array:
+	var w := PackedFloat32Array()
+	w.resize(B_IN * B_HID + B_HID + B_HID * B_OUT + B_OUT)
+	for i in B_IN:
+		w[i * B_HID + i] = 1.0   # identity: sensors -> hidden
+	if sp == CreatureData.Species.HERB:
+		w[42] = 1.0    # food.x -> move.x
+		w[45] = 1.0    # food.y -> move.y
+		w[46] = -1.5   # threat.x -> move away
+		w[49] = -1.5   # threat.y -> move away
+	else:
+		w[46] = 1.0    # prey.x -> move.x
+		w[49] = 1.0    # prey.y -> move.y
+	for i in w.size():
+		w[i] += randf_range(-0.15, 0.15)
+	return w
+
 func mutate_brain(src: PackedFloat32Array) -> PackedFloat32Array:
 	var w := src.duplicate()
 	for i in w.size():
@@ -119,6 +136,10 @@ func brain_think(c: CreatureData) -> Vector2:
 		var t := nearest_predator(c, c.sense + 0.5)
 		if t != null:
 			other = Vector2(t.x - c.x, t.z - c.z).normalized()
+			c.alert_ticks = alert_memory
+		else:
+			if c.alert_ticks > 0:
+				c.alert_ticks -= 1
 	else:
 		var p := nearest_prey(c, c.sense * pred_hunt_mult)
 		if p != null:
@@ -169,6 +190,7 @@ func spawn_initial() -> void:
 			c.energy = 80.0
 			c.speed = pred_innate_speed
 			c.sense = pred_innate_sense
+			c.brain = make_prior_brain(CreatureData.Species.PRED)
 			creatures.append(c)
 			preds += 1
 
@@ -186,7 +208,7 @@ func make_creature(px: float, pz: float, parent: CreatureData) -> CreatureData:
 	if parent != null and parent.brain.size() > 0:
 		c.brain = mutate_brain(parent.brain)
 	else:
-		c.brain = make_random_brain()
+		c.brain = make_prior_brain(CreatureData.Species.HERB)
 	return c
 
 func make_baby(parent: CreatureData) -> CreatureData:

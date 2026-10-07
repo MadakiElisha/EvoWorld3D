@@ -17,6 +17,7 @@ var visual_root: Node3D
 var creature_mm: MultiMesh
 var head_mm: MultiMeshInstance3D
 var leg_mm: MultiMeshInstance3D
+var tail_mm: MultiMeshInstance3D
 var acc := 0.0
 var extinction_announced := false
 var lab: BalanceLab = null
@@ -185,16 +186,29 @@ func build_creature_visual() -> void:
 	
 	leg_mm = MultiMeshInstance3D.new()
 	var leg_mesh := BoxMesh.new()
-	leg_mesh.size = Vector3(0.14, 0.12, 0.5)
+	leg_mesh.size = Vector3(0.1, 0.22, 0.1)
 	var leg_mat := StandardMaterial3D.new()
 	leg_mat.albedo_color = Color(0.15, 0.1, 0.08)
 	leg_mesh.material = leg_mat
 	var leg_mult := MultiMesh.new()
 	leg_mult.transform_format = MultiMesh.TRANSFORM_3D
-	leg_mult.instance_count = MAX_POP
+	leg_mult.instance_count = MAX_POP * 4
 	leg_mult.mesh = leg_mesh
 	leg_mm.multimesh = leg_mult
 	add_child(leg_mm)
+	
+	tail_mm = MultiMeshInstance3D.new()
+	var tail_mesh := BoxMesh.new()
+	tail_mesh.size = Vector3(0.08, 0.08, 0.25)
+	var tail_mat := StandardMaterial3D.new()
+	tail_mat.albedo_color = Color(0.2, 0.14, 0.1)
+	tail_mesh.material = tail_mat
+	var tail_mult := MultiMesh.new()
+	tail_mult.transform_format = MultiMesh.TRANSFORM_3D
+	tail_mult.instance_count = MAX_POP
+	tail_mult.mesh = tail_mesh
+	tail_mm.multimesh = tail_mult
+	add_child(tail_mm)
 
 func render_creatures() -> void:
 	var n := sim.creatures.size()
@@ -208,25 +222,31 @@ func render_creatures() -> void:
 		var wz := c.z - world.depth / 2.0
 		var e := clampf(c.energy / 100.0, 0.0, 1.0)
 		var facing := Basis(Vector3.UP, c.heading)
-		var by := y
-		if c.species == CreatureData.Species.PRED:
-			by = y + 0.1
-			var basis := facing.scaled(Vector3(1.35, 1.35, 1.35))
-			creature_mm.set_instance_transform(i, Transform3D(basis, Vector3(wx, by, wz)))
+		var is_pred := c.species == CreatureData.Species.PRED
+		var scale := 1.35 if is_pred else 1.0
+		var body_pos := Vector3(wx, y + (0.1 if is_pred else 0.0), wz)
+		creature_mm.set_instance_transform(i, Transform3D(facing.scaled(Vector3(scale, scale, scale)), body_pos))
+		if is_pred:
 			creature_mm.set_instance_color(i, Color.from_hsv(0.86, 0.9, 0.45 + 0.55 * e))
 		else:
-			creature_mm.set_instance_transform(i, Transform3D(facing, Vector3(wx, by, wz)))
 			var hue := 0.05 + 0.33 * (1.0 - clampf((c.speed - 0.2) / 2.8, 0.0, 1.0))
 			creature_mm.set_instance_color(i, Color.from_hsv(hue, 0.85, 0.45 + 0.55 * e))
-		var forward := Vector3(sin(c.heading), 0.0, cos(c.heading))
-		var head_scale := 0.6 + 0.6 * clampf(c.sense / 3.0, 0.0, 1.0)
-		var head_basis := Basis(Vector3.UP, c.heading).scaled(Vector3(head_scale, head_scale, head_scale))
-		head_mm.multimesh.set_instance_transform(i, Transform3D(head_basis, Vector3(wx, by, wz) + forward * 0.3 + Vector3.UP * 0.22))
+		var hs := 0.6 + 0.6 * clampf(c.sense / 3.0, 0.0, 1.0)
+		head_mm.multimesh.set_instance_transform(i, Transform3D(facing.scaled(Vector3(hs, hs, hs)), body_pos + facing * (Vector3(0, 0.18, 0.42) * scale)))
+		var wag := sin(c.distance_walked * 4.0) * 0.15
+		tail_mm.multimesh.set_instance_transform(i, Transform3D(facing, body_pos + facing * (Vector3(wag * 0.3, 0.05, -0.42) * scale)))
 		var phase := fmod(c.distance_walked * 3.0, TAU)
-		var leg_lift := absf(sin(phase)) * 0.06
-		var leg_slide := cos(phase) * 0.08
-		leg_mm.multimesh.set_instance_transform(i, Transform3D(facing, Vector3(wx, by - 0.24 + leg_lift, wz) + forward * leg_slide))
-		
+		var leg_local := [
+			Vector3(-0.14, -0.22, 0.24), Vector3(0.14, -0.22, 0.24),
+			Vector3(-0.14, -0.22, -0.24), Vector3(0.14, -0.22, -0.24)
+		]
+		for L in 4:
+			var diag := 0.0 if (L == 0 or L == 3) else PI
+			var lift := absf(sin(phase + diag)) * 0.07
+			var swing := cos(phase + diag) * 0.1
+			leg_mm.multimesh.set_instance_transform(i * 4 + L, Transform3D(facing, body_pos + facing * ((leg_local[L] + Vector3(0, lift, swing)) * scale)))
 	for j in range(n, MAX_POP):
 		head_mm.multimesh.set_instance_transform(j, Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO))
+		tail_mm.multimesh.set_instance_transform(j, Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO))
+	for j in range(n * 4, MAX_POP * 4):
 		leg_mm.multimesh.set_instance_transform(j, Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO))
