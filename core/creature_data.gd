@@ -13,6 +13,9 @@ var wander_angle: float = 0.0
 var alive: bool = true
 var cooldown: int = 0
 var alert_ticks := 0   # vigilance memory: >0 = head up; 0 = grazing (ambushable)
+var threat: CreatureData = null   # cached nearest predator (herbivores)
+var target: CreatureData = null   # cached nearest prey (predators)
+var scan_timer := 0
 
 # Genes (mutate on reproduction)
 var speed: float = 1.0

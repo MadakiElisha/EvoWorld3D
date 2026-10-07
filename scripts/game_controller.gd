@@ -1,8 +1,8 @@
 extends Node3D
 ## Composition root: owns world + sim, paints both, runs the clock.
 
-@export var width := 48
-@export var depth := 48
+@export var width := 72
+@export var depth := 72
 @export var world_seed := 524274379   # a known-good island as the front door
 @export var max_height := 8
 @export var time_scale := 1
@@ -20,7 +20,7 @@ var extinction_announced := false
 var lab: BalanceLab = null
 
 const BASE_TPS := 8.0
-const MAX_POP := 300
+const MAX_POP := 800
 
 func _ready() -> void:
 	visual_root = Node3D.new()
@@ -60,6 +60,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				restart()
 
 func _process(delta: float) -> void:
+	if outcome != "":
+		return
 	acc += delta * BASE_TPS * time_scale
 	var guard := 0
 	while acc >= 1.0 and guard < 500:
@@ -87,6 +89,7 @@ func _process(delta: float) -> void:
 	render_creatures()
 
 func restart() -> void:
+	outcome = ""
 	for child in visual_root.get_children():
 		child.queue_free()
 	extinction_announced = false

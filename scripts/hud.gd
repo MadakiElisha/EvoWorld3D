@@ -3,8 +3,8 @@ extends Control
 
 const MAX_SAMPLES := 240
 const SAMPLE_EVERY := 50
-const MAX_HERB := 300.0
-const MAX_PRED := 60.0
+const MAX_HERB := 700.0
+const MAX_PRED := 160.0
 
 var history_h: PackedFloat32Array = PackedFloat32Array()
 var history_p: PackedFloat32Array = PackedFloat32Array()

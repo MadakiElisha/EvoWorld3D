@@ -19,9 +19,9 @@ var forest_regrow_mult := 0.65
 var food_max := 1.0
 
 # --- population ---
-var start_herbs := 80
-var start_preds := 6
-var max_pop := 300
+var start_herbs := 160
+var start_preds := 20
+var max_pop := 700
 
 # --- herbivores ---
 var eat_gain := 18.0
@@ -57,6 +57,7 @@ var pred_step_mult := 1.3
 var pred_rival_cost := 0.35
 var pred_rival_radius := 2.5
 var pred_breed_max_rivals := 1   # territorial: no breeding when the neighborhood is full
+var scan_interval := 4
 
 # --- ambush / vigilance ---
 var ambush_p := 0.85
@@ -80,6 +81,7 @@ var _w_attempts := 0
 var _w_pred_births := 0
 var _w_pred_deaths := 0
 var _w_ambush := 0
+
 
 func _init(p_world: WorldData) -> void:
 	world = p_world
@@ -298,12 +300,16 @@ func step_creature(c: CreatureData) -> int:
 	if c.species == CreatureData.Species.HERB:
 		var safe := world.biome_at(int(floor(c.x)), int(floor(c.z))) == WorldData.Biome.FOREST
 		var desperate := c.energy < fear_energy
-		var threat: CreatureData = null
-		if not safe:
-			threat = nearest_predator(c, 1.8 if desperate else c.sense + 0.5)
-		if threat != null:
+		if c.scan_timer <= 0:
+			c.scan_timer = scan_interval
+			c.threat = null if safe else nearest_predator(c, 1.8 if desperate else c.sense + 0.5)
+		else:
+			c.scan_timer -= 1
+			if c.threat != null and (not c.threat.alive or safe):
+				c.threat = null
+		if c.threat != null:
 			c.alert_ticks = alert_memory
-			desired = Vector2(c.x - threat.x, c.z - threat.z)
+			desired = Vector2(c.x - c.threat.x, c.z - c.threat.z)
 			fleeing = true
 		else:
 			if c.alert_ticks > 0:
@@ -313,9 +319,15 @@ func step_creature(c: CreatureData) -> int:
 				c.wander_angle += randf_range(-0.6, 0.6)
 				desired = Vector2(cos(c.wander_angle), sin(c.wander_angle))
 	else:
-		var prey := nearest_prey(c, c.sense * pred_hunt_mult)
-		if prey != null:
-			desired = Vector2(prey.x - c.x, prey.z - c.z)
+		if c.scan_timer <= 0:
+			c.scan_timer = scan_interval
+			c.target = nearest_prey(c, c.sense * pred_hunt_mult)
+		else:
+			c.scan_timer -= 1
+			if c.target != null and (not c.target.alive or world.biome_at(int(floor(c.target.x)), int(floor(c.target.z))) == WorldData.Biome.FOREST):
+				c.target = null
+		if c.target != null:
+			desired = Vector2(c.target.x - c.x, c.target.z - c.z)
 		else:
 			c.wander_angle += randf_range(-0.6, 0.6)
 			desired = Vector2(cos(c.wander_angle), sin(c.wander_angle))
