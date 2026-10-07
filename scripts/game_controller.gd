@@ -16,12 +16,14 @@ var sim: Simulation
 var visual_root: Node3D
 var creature_mm: MultiMesh
 var head_mm: MultiMeshInstance3D
+var ear_mm: MultiMeshInstance3D
 var leg_mm: MultiMeshInstance3D
 var tail_mm: MultiMeshInstance3D
 var acc := 0.0
 var extinction_announced := false
 var lab: BalanceLab = null
 var fp_index := -1
+var pixel_noise: ImageTexture
 
 const BASE_TPS := 8.0
 const MAX_POP := 800
@@ -30,6 +32,28 @@ func _ready() -> void:
 	visual_root = Node3D.new()
 	add_child(visual_root)
 	restart()
+	pixel_noise = make_pixel_noise(8, 0.6, 1.0)
+	_apply_pixel_look()
+
+func make_pixel_noise(size := 16, lo := 0.78, hi := 1.0) -> ImageTexture:
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	for x in size:
+		for y in size:
+			var v := randf_range(lo, hi)
+			img.set_pixel(x, y, Color(v, v, v, 1.0))
+	return ImageTexture.create_from_image(img)
+
+func _apply_pixel_look() -> void:
+	for child in get_children():
+		if child is MultiMeshInstance3D:
+			var mesh: Mesh = child.multimesh.mesh
+			var mat := mesh.material as StandardMaterial3D
+			if mat == null:
+				mat = StandardMaterial3D.new()
+				mesh.material = mat
+			mat.albedo_texture = pixel_noise
+			mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+			mat.vertex_color_use_as_albedo = true
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed:
@@ -209,6 +233,19 @@ func build_creature_visual() -> void:
 	tail_mult.mesh = tail_mesh
 	tail_mm.multimesh = tail_mult
 	add_child(tail_mm)
+	
+	ear_mm = MultiMeshInstance3D.new()
+	var ear_mesh := BoxMesh.new()
+	ear_mesh.size = Vector3(0.08, 0.12, 0.06)
+	var ear_mat := StandardMaterial3D.new()
+	ear_mat.albedo_color = Color(0.12, 0.09, 0.08)
+	ear_mesh.material = ear_mat
+	var ear_mult := MultiMesh.new()
+	ear_mult.transform_format = MultiMesh.TRANSFORM_3D
+	ear_mult.instance_count = MAX_POP * 2
+	ear_mult.mesh = ear_mesh
+	ear_mm.multimesh = ear_mult
+	add_child(ear_mm)
 
 func render_creatures() -> void:
 	var n := sim.creatures.size()
@@ -245,8 +282,13 @@ func render_creatures() -> void:
 			var lift := absf(sin(phase + diag)) * 0.07
 			var swing := cos(phase + diag) * 0.1
 			leg_mm.multimesh.set_instance_transform(i * 4 + L, Transform3D(facing, body_pos + facing * ((leg_local[L] + Vector3(0, lift, swing)) * scale)))
+		for E in 2:
+			var ex := -0.1 if E == 0 else 0.1
+			ear_mm.multimesh.set_instance_transform(i * 2 + E, Transform3D(facing, body_pos + facing * (Vector3(ex, 0.3, 0.4) * scale)))
 	for j in range(n, MAX_POP):
 		head_mm.multimesh.set_instance_transform(j, Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO))
 		tail_mm.multimesh.set_instance_transform(j, Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO))
 	for j in range(n * 4, MAX_POP * 4):
 		leg_mm.multimesh.set_instance_transform(j, Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO))
+	for j in range(n * 2, MAX_POP * 2):
+		ear_mm.multimesh.set_instance_transform(j, Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO))
