@@ -85,6 +85,12 @@ func _apply_pixel_look() -> void:
 		if mat == null:
 			mat = StandardMaterial3D.new()
 			mesh.material = mat
+		if node is MultiMeshInstance3D:
+			var mmult: MultiMesh = node.multimesh
+			for i in mmult.instance_count:
+				var col: Color = mmult.get_instance_color(i)
+				if col.a > 0.0:
+					mmult.set_instance_color(i, col * randf_range(0.86, 1.08))
 		mat.albedo_texture = pixel_noise
 		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 		mat.vertex_color_use_as_albedo = true
