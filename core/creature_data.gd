@@ -24,3 +24,9 @@ var speed: float = 1.0
 var sense: float = 1.5
 var metabolism: float = 1.0
 var brain := PackedFloat32Array()   # 56 weights: 6 sensors -> 6 hidden -> 2 motor
+var use_brain := false
+
+var prev_x := 0.0
+var prev_z := 0.0
+var last_step := 0.0
+var sprint_out := 0.0

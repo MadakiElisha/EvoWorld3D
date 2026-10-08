@@ -63,7 +63,17 @@ var scan_interval := 4
 var ambush_p := 0.85
 var alert_memory := 30
 
+var step_scale := 0.3
+var turn_rate := 0.35
+var neuron_cost := 0.004
+const NRAYS := 5
+const B_IN2 := NRAYS * 3 + 2
+const B_HID2 := 12
+const B_OUT2 := 3
+
 var brain_mode := 0   # 0 = hand-written reflexes, 1 = evolved neural net
+var champ_herb := PackedFloat32Array()
+var champ_pred := PackedFloat32Array()
 const B_IN := 6
 const B_HID := 6
 const B_OUT := 2
@@ -97,7 +107,7 @@ func _init(p_world: WorldData) -> void:
 
 func make_random_brain() -> PackedFloat32Array:
 	var w := PackedFloat32Array()
-	w.resize(B_IN * B_HID + B_HID + B_HID * B_OUT + B_OUT)
+	w.resize(B_IN2 * B_HID2 + B_HID2 + B_HID2 * B_OUT2 + B_OUT2)
 	for i in w.size():
 		w[i] = randf_range(-1.0, 1.0)
 	return w
@@ -126,38 +136,92 @@ func mutate_brain(src: PackedFloat32Array) -> PackedFloat32Array:
 			w[i] = clampf(w[i] + randf_range(-0.4, 0.4), -3.0, 3.0)
 	return w
 
+func brain_sense(c: CreatureData) -> PackedFloat32Array:
+	var inp := PackedFloat32Array()
+	inp.resize(B_IN2)
+	var max_len := c.sense * 2.0
+	var is_herb := c.species == CreatureData.Species.HERB
+	var target: CreatureData = nearest_predator(c, max_len) if is_herb else nearest_prey(c, max_len)
+	for r in NRAYS:
+		var ang := c.heading + deg_to_rad(-60.0 + 30.0 * r)
+		var dx := sin(ang); var dz := cos(ang)
+		var food_v := 0.0; var wall_v := 0.0
+		var d := 0.5
+		while d <= max_len:
+			var tx := int(floor(c.x + dx * d)); var tz := int(floor(c.z + dz * d))
+			if tx < 0 or tz < 0 or tx >= world.width or tz >= world.depth or world.biome_at(tx, tz) == WorldData.Biome.WATER:
+				wall_v = 1.0 - d / max_len; break
+			if is_herb and food_v == 0.0 and food[tx * world.depth + tz] > 0.2:
+				food_v = 1.0 - d / max_len
+			d += 0.5
+		var other_v := 0.0
+		if target != null:
+			var ta := atan2(target.x - c.x, target.z - c.z)
+			if absf(wrapf(ta - ang, -PI, PI)) < deg_to_rad(18.0):
+				other_v = clampf(1.0 - Vector2(target.x - c.x, target.z - c.z).length() / max_len, 0.0, 1.0)
+		inp[r * 3 + 0] = food_v if is_herb else other_v
+		inp[r * 3 + 1] = other_v if is_herb else 0.0
+		inp[r * 3 + 2] = wall_v
+	inp[NRAYS * 3 + 0] = clampf(c.energy / 150.0, 0.0, 1.0) * 2.0 - 1.0
+	inp[NRAYS * 3 + 1] = 1.0
+	return inp
+
 func brain_think(c: CreatureData) -> Vector2:
-	var food := Vector2.ZERO
-	var other := Vector2.ZERO
+	var inp := brain_sense(c)
+	var h := []
+	h.resize(B_HID2)
+	for j in B_HID2:
+		var s := 0.0
+		for i in B_IN2:
+			s += inp[i] * c.brain[i * B_HID2 + j]
+		h[j] = tanh(s + c.brain[B_IN2 * B_HID2 + j])
+	var out := [0.0, 0.0, 0.0]
+	for k in B_OUT2:
+		var s := 0.0
+		for j in B_HID2:
+			s += h[j] * c.brain[B_IN2 * B_HID2 + B_HID2 + j * B_OUT2 + k]
+		out[k] = tanh(s + c.brain[B_IN2 * B_HID2 + B_HID2 + B_HID2 * B_OUT2 + k])
+	c.sprint_out = out[2]
+	return Vector2(out[0], (out[1] + 1.0) * 0.5)
+
+func reflex_control(c: CreatureData) -> Vector3:
+	var desired := Vector2.ZERO
+	var fleeing := false
 	if c.species == CreatureData.Species.HERB:
-		var sf := seek_food(c)
-		if sf.length_squared() > 0.0001:
-			food = sf.normalized()
-		var t := nearest_predator(c, c.sense + 0.5)
-		if t != null:
-			other = Vector2(t.x - c.x, t.z - c.z).normalized()
+		var safe := world.biome_at(int(floor(c.x)), int(floor(c.z))) == WorldData.Biome.FOREST
+		var desperate := c.energy < fear_energy
+		if c.scan_timer <= 0:
+			c.scan_timer = scan_interval
+			c.threat = null if safe else nearest_predator(c, 1.8 if desperate else c.sense + 0.5)
+		else:
+			c.scan_timer -= 1
+			if c.threat != null and (not c.threat.alive or safe):
+				c.threat = null
+		if c.threat != null:
 			c.alert_ticks = alert_memory
+			desired = Vector2(c.x - c.threat.x, c.z - c.threat.z)
+			fleeing = true
 		else:
 			if c.alert_ticks > 0:
 				c.alert_ticks -= 1
+			desired = seek_food(c)
+			if desired == Vector2.ZERO:
+				c.wander_angle += randf_range(-0.6, 0.6)
+				desired = Vector2(cos(c.wander_angle), sin(c.wander_angle))
 	else:
-		var p := nearest_prey(c, c.sense * pred_hunt_mult)
-		if p != null:
-			other = Vector2(p.x - c.x, p.z - c.z).normalized()
-	var inputs := [food.x, food.y, other.x, other.y, clampf(c.energy / 150.0, 0.0, 1.0) * 2.0 - 1.0, 1.0]
-	var h := [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-	for j in B_HID:
-		var s := 0.0
-		for i in B_IN:
-			s += inputs[i] * c.brain[i * B_HID + j]
-		h[j] = tanh(s + c.brain[B_IN * B_HID + j])
-	var out := [0.0, 0.0]
-	for k in B_OUT:
-		var s2 := 0.0
-		for j in B_HID:
-			s2 += h[j] * c.brain[B_IN * B_HID + B_HID + j * B_OUT + k]
-		out[k] = tanh(s2 + c.brain[B_IN * B_HID + B_HID + B_HID * B_OUT + k])
-	return Vector2(out[0], out[1])
+		if c.scan_timer <= 0:
+			c.scan_timer = scan_interval
+			c.target = nearest_prey(c, c.sense * pred_hunt_mult)
+		else:
+			c.scan_timer -= 1
+			if c.target != null and (not c.target.alive or world.biome_at(int(floor(c.target.x)), int(floor(c.target.z))) == WorldData.Biome.FOREST):
+				c.target = null
+		if c.target != null:
+			desired = Vector2(c.target.x - c.x, c.target.z - c.z)
+		else:
+			c.wander_angle += randf_range(-0.6, 0.6)
+			desired = Vector2(cos(c.wander_angle), sin(c.wander_angle))
+	return Vector3(desired.x, desired.y, 1.0 if fleeing else 0.0)
 
 func seed_food() -> void:
 	for x in world.width:
@@ -187,10 +251,10 @@ func spawn_initial() -> void:
 		if world.is_walkable(x, z):
 			var c := make_creature(x + 0.5, z + 0.5, null)
 			c.species = CreatureData.Species.PRED
+			c.brain = mutate_brain(champ_pred) if champ_pred.size() > 0 else c.brain
 			c.energy = 80.0
 			c.speed = pred_innate_speed
 			c.sense = pred_innate_sense
-			c.brain = make_prior_brain(CreatureData.Species.PRED)
 			creatures.append(c)
 			preds += 1
 
@@ -205,10 +269,11 @@ func make_creature(px: float, pz: float, parent: CreatureData) -> CreatureData:
 		c.sense = mutate(parent.sense)
 		c.metabolism = mutate(parent.metabolism)
 		c.energy = pred_baby_energy if parent.species == CreatureData.Species.PRED else herb_baby_energy
+		c.use_brain = brain_mode == 1
 	if parent != null and parent.brain.size() > 0:
 		c.brain = mutate_brain(parent.brain)
 	else:
-		c.brain = make_prior_brain(CreatureData.Species.HERB)
+		c.brain = mutate_brain(champ_herb) if champ_herb.size() > 0 else make_random_brain()
 	return c
 
 func make_baby(parent: CreatureData) -> CreatureData:
@@ -298,6 +363,8 @@ func _age_and_burn(c: CreatureData) -> void:
 	c.energy -= 0.05 * c.sense * c.sense * body_mult
 	if c.species == CreatureData.Species.PRED:
 		c.energy -= pred_rival_cost * _rival_count(c)
+	if brain_mode == 1:
+		c.energy -= neuron_cost * B_HID2
 
 func _rival_count(c: CreatureData) -> int:
 	var n := 0
@@ -368,71 +435,54 @@ func _survive_and_birth(babies: Array[CreatureData]) -> void:
 
 ## Returns 0 = stayed, 1 = moved, 2 = moved while fleeing.
 func step_creature(c: CreatureData) -> int:
-	var desired := Vector2.ZERO
+	c.prev_x = c.x
+	c.prev_z = c.z
 	var fleeing := false
-
-	if brain_mode == 1:
-		desired = brain_think(c)
-	elif c.species == CreatureData.Species.HERB:
-		var safe := world.biome_at(int(floor(c.x)), int(floor(c.z))) == WorldData.Biome.FOREST
-		var desperate := c.energy < fear_energy
-		if c.scan_timer <= 0:
-			c.scan_timer = scan_interval
-			c.threat = null if safe else nearest_predator(c, 1.8 if desperate else c.sense + 0.5)
-		else:
-			c.scan_timer -= 1
-			if c.threat != null and (not c.threat.alive or safe):
-				c.threat = null
-		if c.threat != null:
+	if c.use_brain and c.brain.size() > 0:
+		var out := brain_think(c)
+		fleeing = c.sprint_out > 0.5
+		if c.threat != null and c.threat.alive:
 			c.alert_ticks = alert_memory
-			desired = Vector2(c.x - c.threat.x, c.z - c.threat.z)
-			fleeing = true
-		else:
-			if c.alert_ticks > 0:
-				c.alert_ticks -= 1
-			desired = seek_food(c)
-			if desired == Vector2.ZERO:
-				c.wander_angle += randf_range(-0.6, 0.6)
-				desired = Vector2(cos(c.wander_angle), sin(c.wander_angle))
-	else:
-		if c.scan_timer <= 0:
-			c.scan_timer = scan_interval
-			c.target = nearest_prey(c, c.sense * pred_hunt_mult)
-		else:
-			c.scan_timer -= 1
-			if c.target != null and (not c.target.alive or world.biome_at(int(floor(c.target.x)), int(floor(c.target.z))) == WorldData.Biome.FOREST):
-				c.target = null
-		if c.target != null:
-			desired = Vector2(c.target.x - c.x, c.target.z - c.z)
-		else:
-			c.wander_angle += randf_range(-0.6, 0.6)
-			desired = Vector2(cos(c.wander_angle), sin(c.wander_angle))
-
-	if desired.length_squared() < 0.0001:
-		return 0
-	desired = desired.normalized()
-
-	var step_len := 0.3 * c.speed
-	if c.species == CreatureData.Species.PRED:
-		step_len *= pred_step_mult
-	if fleeing:
-		step_len *= panic_speed_mult
-
-	var nx := c.x + desired.x * step_len
-	var nz := c.z + desired.y * step_len
-	var ntx := int(floor(nx))
-	var ntz := int(floor(nz))
-	var blocked := not world.is_walkable(ntx, ntz)
-	if not blocked and c.species == CreatureData.Species.PRED:
-		blocked = world.biome_at(ntx, ntz) == WorldData.Biome.FOREST
-	if not blocked:
-		var moved := sqrt((nx - c.x) * (nx - c.x) + (nz - c.z) * (nz - c.z))
-		c.distance_walked += moved
+		elif c.alert_ticks > 0:
+			c.alert_ticks -= 1
+		c.heading = wrapf(c.heading + out.x * turn_rate, -PI, PI)
+		var sp := c.speed * step_scale * out.y
+		if fleeing:
+			sp *= panic_speed_mult
+		c.last_step = sp
+		if sp <= 0.0001:
+			return 0
+		var nx := c.x + sin(c.heading) * sp
+		var nz := c.z + cos(c.heading) * sp
+		var tx := int(floor(nx)); var tz := int(floor(nz))
+		if tx < 0 or tz < 0 or tx >= world.width or tz >= world.depth or not world.is_walkable(tx, tz):
+			return 0
 		c.x = nx
 		c.z = nz
-		c.heading = atan2(desired.x, desired.y)
+		c.distance_walked += sp
 		return 2 if fleeing else 1
-	return 0
+	else:
+		var rc := reflex_control(c)
+		fleeing = rc.z > 0.5
+		var d := Vector2(rc.x, rc.y)
+		if d.length_squared() < 0.0001:
+			c.last_step = 0.0
+			return 0
+		d = d.normalized()
+		var sp := c.speed * step_scale
+		if fleeing:
+			sp *= panic_speed_mult
+		c.last_step = sp
+		c.heading = atan2(d.x, d.y)
+		var nx := c.x + d.x * sp
+		var nz := c.z + d.y * sp
+		var tx2 := int(floor(nx)); var tz2 := int(floor(nz))
+		if tx2 < 0 or tz2 < 0 or tx2 >= world.width or tz2 >= world.depth or not world.is_walkable(tx2, tz2):
+			return 0
+		c.x = nx
+		c.z = nz
+		c.distance_walked += sp
+		return 2 if fleeing else 1
 
 func seek_food(c: CreatureData) -> Vector2:
 	var tx := int(floor(c.x))
@@ -566,6 +616,7 @@ func spawn_preds(n: int) -> void:
 			if world.is_walkable(x, z) and world.biome_at(x, z) != WorldData.Biome.FOREST:
 				var c := make_creature(x + 0.5, z + 0.5, donor)
 				c.species = CreatureData.Species.PRED
+				c.brain = mutate_brain(champ_pred) if champ_pred.size() > 0 else c.brain
 				c.energy = 80.0
 				c.age = randi_range(0, 200)
 				if donor == null:

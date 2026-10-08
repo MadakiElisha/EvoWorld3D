@@ -24,6 +24,7 @@ var extinction_announced := false
 var lab: BalanceLab = null
 var fp_index := -1
 var pixel_noise: ImageTexture
+var trainer: BrainTrainer = null
 
 var trunk_mm: MultiMeshInstance3D
 var leaf_mm: MultiMeshInstance3D
@@ -198,7 +199,13 @@ func _unhandled_input(event: InputEvent) -> void:
 					get_node("Camera3D").set_process(true)
 			KEY_B:
 				sim.brain_mode = 1 - sim.brain_mode
+				for cc in sim.creatures:
+					cc.use_brain = sim.brain_mode == 1
 				print("GOD: brain_mode = %d" % sim.brain_mode)
+			KEY_F7:
+				if trainer == null:
+					trainer = BrainTrainer.new(sim)
+					print("TRAINING started — watch Output")
 
 func _process(delta: float) -> void:
 	if outcome != "":
@@ -227,6 +234,9 @@ func _process(delta: float) -> void:
 			outcome = "COLLAPSE"
 		elif sim.tick_count >= 10000 and ct.x > 0 and ct.y > 0:
 			outcome = "STEWARD"
+	if trainer != null:
+		if not trainer.step():
+			trainer = null
 	render_creatures()
 	
 	if fp_index >= 0 and sim.creatures.size() > 0:
@@ -352,6 +362,7 @@ func build_creature_visual() -> void:
 	add_child(ear_mm)
 
 func render_creatures() -> void:
+	var frac := clampf(acc, 0.0, 1.0)
 	var n := sim.creatures.size()
 	creature_mm.visible_instance_count = n
 	for i in n:
@@ -359,8 +370,10 @@ func render_creatures() -> void:
 		var tx := int(floor(c.x))
 		var tz := int(floor(c.z))
 		var y := world.height_at(tx, tz) + 0.3
-		var wx := c.x - world.width / 2.0
-		var wz := c.z - world.depth / 2.0
+		var rx := lerpf(c.prev_x, c.x, frac)
+		var rz := lerpf(c.prev_z, c.z, frac)
+		var wx := rx - world.width / 2.0
+		var wz := rz - world.depth / 2.0
 		var e := clampf(c.energy / 100.0, 0.0, 1.0)
 		var facing := Basis(Vector3.UP, c.heading)
 		var is_pred := c.species == CreatureData.Species.PRED
