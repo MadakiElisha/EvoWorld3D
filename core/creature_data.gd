@@ -18,14 +18,17 @@ var target: CreatureData = null   # cached nearest prey (predators)
 var scan_timer := 0
 var heading: float = 0.0   # yaw the body faces (radians)
 var distance_walked := 0.0
+var offspring := 0         # lifetime births (fitness signal, inspector data)
+var cell := -1             # spatial-grid bucket (owned by Simulation)
 
 # Genes (mutate on reproduction)
 var speed: float = 1.0
 var sense: float = 1.5
 var metabolism: float = 1.0
-var brain := PackedFloat32Array()   # 56 weights: 6 sensors -> 6 hidden -> 2 motor
+var brain := PackedFloat32Array()   # Simulation.BRAIN_SIZE weights: 17 sensors -> 12 hidden -> 3 motor
 var use_brain := false
 
+# Render interpolation (previous tick's position)
 var prev_x := 0.0
 var prev_z := 0.0
 var last_step := 0.0
