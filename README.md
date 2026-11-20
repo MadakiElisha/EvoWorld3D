@@ -49,6 +49,7 @@ GODOT=godot tools/regress.sh --runs=10 --brain                             # wit
 
 # Train brains; the champions are saved to user://champions.bin and the game loads them on start
 godot --headless --path . -s res://tools/train.gd
+godot --headless --path . -s res://tools/train.gd -- --ticks=700 --shape=3 --curriculum=1   # fitness shaping + easy-to-hard arenas
 
 # Hill-climb balance knobs
 godot --headless --path . -s res://tools/lab.gd

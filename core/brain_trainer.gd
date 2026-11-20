@@ -5,15 +5,31 @@ extends RefCounted
 ## Incremental: call step(budget_ms) every frame, or step(INF) headless.
 ##
 ## Fitness is lifetime-based and always read from the candidate itself:
-##   100 * (ticks survived / TICKS) + 0.5 * energy if alive + 40 * offspring
+##   100 * (ticks survived / ticks) + 0.5 * energy if alive + 40 * offspring
+##   + optional shaping: `shape` points per tile closed on the SAME target (food tile or
+##     prey). Steps where the target changes are skipped, so a kill (next prey
+##     is farther away) or a finished meal is never punished.
+## Optional curriculum: early generations train in easier arenas (fewer predators for
+## herbivores, slower prey for predators), ramping to full difficulty by 60% of
+## the run. Measurement always uses full difficulty and no shaping.
 ## Every candidate in a generation faces the same arenas (common random numbers),
 ## so differences in score come from the brain, not from luck.
 
 const POP := 16
 const ELITE := 4
 const GENS := 20
-const TICKS := 500
 const SEEDS := 4
+const MEASURE_SEEDS := 12   # more arenas for the final comparison (less noise)
+
+# Tunable per run (tools/train.gd flags: --ticks= --shape= --curriculum=0/1).
+# Defaults are the proven setup. A/B on seed 1 (12 measurement arenas):
+#   default                  herb 1.9x reflex, pred 0.86x reflex
+#   ticks=700 shape=3 curr=1 herb 2.2x reflex, pred 0.57x reflex
+# Shaping seems to teach predators to charge, which alerts prey and loses the
+# 0.85 ambush strike. Both champion sets kept all 3 islands alive in brain mode.
+var ticks := 500
+var shape := 0.0            # points per tile closed on the same target; 0 = off
+var curriculum := false
 
 var done := false
 var champ_herb := PackedFloat32Array()
@@ -34,6 +50,10 @@ var _tick := 0
 var _sim: Simulation = null
 var _focal: CreatureData = null
 var _acc := 0.0
+var _shape := 0.0
+var _prev_d := -1.0
+var _prev_tile := Vector2i(-1, -1)
+var _prev_prey: CreatureData = null
 var _measure_kind := 0
 var _meas := [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
 
@@ -58,9 +78,42 @@ func step(budget_ms: float = 8.0) -> bool:
 			_start_eval()
 		_sim.tick()
 		_tick += 1
-		if _tick >= TICKS or not _focal.alive:
+		if _phase < 2 and shape != 0.0:
+			_sample_shape()
+		if _tick >= ticks or not _focal.alive:
 			_end_eval()
 	return not done
+
+## Reward closing distance on an unchanged target; reset when the target changes.
+func _sample_shape() -> void:
+	if not _focal.alive:
+		return
+	var d := -1.0
+	var same := false
+	if _focal.species == CreatureData.Species.HERB:
+		var off := _sim.seek_food(_focal)
+		if off != Vector2.ZERO:
+			var tile := Vector2i(int(floor(_focal.x + off.x)), int(floor(_focal.z + off.y)))
+			d = off.length()
+			same = tile == _prev_tile
+			_prev_tile = tile
+		else:
+			_prev_tile = Vector2i(-1, -1)
+	else:
+		var prey := _sim.nearest_prey(_focal, 999.0)
+		if prey != null:
+			d = Vector2(prey.x - _focal.x, prey.z - _focal.z).length()
+			same = prey == _prev_prey
+		_prev_prey = prey
+	if same and _prev_d >= 0.0 and d >= 0.0:
+		_shape += (_prev_d - d) * shape
+	_prev_d = d
+
+## 0 = easiest arena, 1 = full difficulty. Measurement is always 1.
+func _difficulty() -> float:
+	if not curriculum or _phase == 2:
+		return 1.0
+	return clampf(float(_gen) / (GENS * 0.6), 0.0, 1.0)
 
 func _current_brain():
 	if _phase == 2:
@@ -91,31 +144,40 @@ func _start_eval() -> void:
 	# same arena seed for every candidate of this generation/species
 	_sim = Simulation.new(w, hash([_phase, _species, _gen, _seed_i]), false)
 	_sim.seed_food()
+	var diff := _difficulty()
 	if _species == 0:
-		for i in 3:
+		for i in 1 + int(round(2.0 * diff)):          # 1 predator -> 3
 			_spawn(_sim, CreatureData.Species.PRED, null)
 		_focal = _spawn(_sim, CreatureData.Species.HERB, _current_brain())
 	else:
 		for i in 6:
-			_spawn(_sim, CreatureData.Species.HERB, null)
+			var prey := _spawn(_sim, CreatureData.Species.HERB, null)
+			if prey != null:
+				prey.speed = lerpf(0.7, 1.2, diff)      # slow prey -> normal
 		_focal = _spawn(_sim, CreatureData.Species.PRED, _current_brain())
 	if _focal == null:   # arena had no room: score as an instant death
 		_focal = CreatureData.new()
 		_focal.alive = false
 	_tick = 0
+	_shape = 0.0
+	_prev_d = -1.0
+	_prev_tile = Vector2i(-1, -1)
+	_prev_prey = null
 
 func _end_eval() -> void:
-	var f := 100.0 * float(_focal.age) / TICKS + 40.0 * _focal.offspring
+	var f := 100.0 * float(_focal.age) / ticks + 40.0 * _focal.offspring + _shape
 	if _focal.alive:
 		f += 0.5 * _focal.energy
 	_acc += f
 	_seed_i += 1
+	_prev_prey = null
 	_sim.release()
 	_sim = null
 	_focal = null
 	_tick = 0
-	if _seed_i >= SEEDS:
-		var score := _acc / SEEDS
+	var n_seeds := SEEDS if _phase < 2 else MEASURE_SEEDS
+	if _seed_i >= n_seeds:
+		var score := _acc / n_seeds
 		_acc = 0.0
 		_seed_i = 0
 		_on_candidate_done(score)
